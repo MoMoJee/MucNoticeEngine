@@ -13,6 +13,7 @@
 | --- | --- | --- |
 | [0001](0001-bootstrap-engine.md) | 初始化独立通知引擎与 REST 服务 | feat |
 | [0002](0002-dotenv-config.md) | 支持从 .env 读取配置 | feat |
+| [0003](0003-portal-type-enumeration.md) | 枚举信息门户通知 type 并归类 | docs |
 
 ## 模板
 

@@ -18,6 +18,7 @@
 | [architecture.md](architecture.md) | 模块边界、数据流、扩展点 | 模块边界或数据流变化时 |
 | [conventions/docs.md](conventions/docs.md) | 文档命名、计划/变更日志写作规范、防过期规则 | 规范本身变化时 |
 | [conventions/git.md](conventions/git.md) | 提交流程、commit message 规范（参照首次提交） | 流程变化时 |
+| [reference/portal-notice-types.md](reference/portal-notice-types.md) | 门户通知 type 枚举与归类（含 CSV） | 门户分类变化时 |
 | [plans/](plans/README.md) | 开发计划（先计划后实现） | 每个功能开发前 |
 | [changelog/](changelog/README.md) | 已交付变更说明 | 每次交付时 |
 
