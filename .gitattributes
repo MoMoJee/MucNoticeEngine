@@ -1,0 +1,7 @@
+# 统一文本换行，避免 Windows/macOS/Linux 之间产生无意义的 CRLF 改动。
+* text=auto eol=lf
+
+# 二进制资源不要做换行/文本处理
+*.png binary
+*.ttf binary
+*.ttc binary

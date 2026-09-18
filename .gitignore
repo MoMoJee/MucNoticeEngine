@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Runtime data (DB, cookies, generated RSS, logs)
+data/
+*.db
+*.db-journal
+*.log
+muc_cookies.json
+muc_notice_rss.xml
+
+# Local config / secrets
+config.toml
+.env
+
+# Reference copy is read-only; keep it tracked but ignore its caches
+reference/**/__pycache__/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

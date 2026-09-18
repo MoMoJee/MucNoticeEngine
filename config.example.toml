@@ -1,0 +1,33 @@
+# MucNoticeEngine 配置示例。
+# 复制为 config.toml 后按需修改；config.toml 已在 .gitignore 中，不会入库。
+# 环境变量优先级高于本文件（见 src/muc_notice_engine/config.py 的 _ENV_MAP）。
+
+# --- 路径 / 存储 ---
+data_dir = "data"
+# db_path = "data/muc_notice.db"   # 不填则跟随 data_dir
+rss_file = "muc_notice_rss.xml"
+
+# --- 抓取 ---
+poll_interval_minutes = 240
+poll_on_start = true
+request_timeout_seconds = 20
+max_concurrent_requests = 5
+rss_max_items = 150
+rss_title = "中央民族大学多站点通知聚合"
+
+# --- 推送 / 保留 ---
+push_max_age_days = 30
+notice_retention_days = 180
+
+# --- 信息门户认证（可选；不填则只抓公开站点）---
+muc_username = ""
+muc_password = ""
+
+# --- REST API ---
+api_host = "127.0.0.1"
+api_port = 8080
+# 非空时 /api/* 需要 Authorization: Bearer <token>；/health 始终公开
+api_token = ""
+
+# --- Webhook ---
+webhook_timeout_seconds = 10
