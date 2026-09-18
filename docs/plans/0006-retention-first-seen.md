@@ -1,6 +1,6 @@
 # 0006 保留期改为按入库时间且默认关闭
 
-- Status: in-progress（开发者已确认实施）
+- Status: done（2026-09-19 交付，见 [changelog/0006](../changelog/0006-retention-first-seen.md)）
 - Owner: MoMoJee
 - Created: 2026-09-19
 - Related: [0005-search-fields-and-window-semantics.md](0005-search-fields-and-window-semantics.md)、`core/storage.py`、`config.py`、`docs/guides/rest-api.md`
@@ -62,9 +62,9 @@
 
 ## 任务拆分
 
-- [ ] `config.py`：默认 0 + 两个环境变量映射
-- [ ] `storage.purge_older_than_days` 改按 `first_seen_at`
-- [ ] 示例文件与 `docs/guides/rest-api.md` 更新
-- [ ] 单元测试（purge 语义、默认值、env 覆盖）
-- [ ] changelog 0006 + 计划/README 状态
-- [ ] 推送 GitHub；更新 10.60.43.8 并验证回填存活
+- [x] `config.py`：默认 0 + 两个环境变量映射
+- [x] `storage.purge_older_than_days` 改按 `first_seen_at`
+- [x] 示例文件与 `docs/guides/rest-api.md` 更新
+- [x] 单元测试（purge 语义、默认值、env 覆盖）
+- [x] changelog 0006 + 计划/README 状态
+- [x] 推送 GitHub；更新 10.60.43.8 并验证回填存活
