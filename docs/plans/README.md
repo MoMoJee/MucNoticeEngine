@@ -17,6 +17,7 @@
 | [0005](0005-search-fields-and-window-semantics.md) | q 搜索字段扩展、归档时间窗语义与 API 文档体系 | done |
 | [0006](0006-retention-first-seen.md) | 保留期改为按入库时间且默认关闭 | done |
 | [0008](0008-lxy-xingong-sources.md) | 理学院 / 信息工程学院公开来源接入 | done |
+| [0009](0009-aop-search-api.md) | AOP 智能搜索接口（远程检索） | done |
 
 ## 模板
 

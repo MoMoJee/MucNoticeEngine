@@ -12,6 +12,7 @@ import sys
 from contextlib import suppress
 
 from .config import load_settings
+from .core.aop import AOP_SITES, AopSearchClient, resolve_site
 from .core.archive import ArchiveQueue, ArchiveStore
 from .core.auth import MucAuthService
 from .core.engine import NoticeEngine
@@ -174,6 +175,55 @@ def cmd_rss(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_search(args: argparse.Namespace) -> int:
+    if not args.site:
+        for site in AOP_SITES:
+            print(f"{site.key:<10} {site.name}  {site.host}  owner={site.owner}")
+        print(f"共 {len(AOP_SITES)} 个可检索站点")
+        return 0
+    if not args.keyword:
+        print("错误：给了 --site 就必须给 --keyword")
+        return 2
+
+    target = resolve_site(args.site)
+    if target is None:
+        print(f"错误：未知站点 --site={args.site}（用 `search` 不带参数列站点）")
+        return 2
+
+    async def _run() -> int:
+        client = AopSearchClient()
+        try:
+            result = await client.search(
+                target,
+                args.keyword,
+                match=args.match,
+                exclude=args.exclude,
+                scope=args.scope,
+                order=args.order,
+                since=args.since,
+                until=args.until,
+                limit=args.limit,
+            )
+        except ValueError as exc:
+            print(f"参数错误：{exc}")
+            return 2
+        for hit in result.hits:
+            print(
+                f"[{hit.owner_name or hit.owner}] {hit.published_at:%Y-%m-%d %H:%M} | {hit.title}"
+            )
+            print(f"  {hit.link}")
+        if result.error:
+            print(f"远端错误：{result.error}")
+        suffix = "，结果被截断" if result.truncated else ""
+        print(
+            f"共 {len(result.hits)} 条（远端 {result.remote_total} 条，"
+            f"扫描 {result.scanned} 条{suffix}）"
+        )
+        return 0 if not result.error else 1
+
+    return asyncio.run(_run())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="muc-notice-engine",
@@ -199,6 +249,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_rss = sub.add_parser("rss", help="抓取并生成 RSS 文件")
     p_rss.add_argument("--source", default=None)
     p_rss.set_defaults(func=cmd_rss)
+
+    p_search = sub.add_parser("search", help="远程检索（AOP 智能搜索，不写库）")
+    p_search.add_argument("--site", default=None, help="站点 key；不带则列出可检索站点")
+    p_search.add_argument("--keyword", default=None, help="关键词，空格分隔")
+    p_search.add_argument(
+        "--match", choices=["all", "any"], default="any", help="all=全部关键词，any=任意一个"
+    )
+    p_search.add_argument("--exclude", default=None, help="空格分隔；命中标题/摘要任一词则排除")
+    p_search.add_argument(
+        "--scope", choices=["all", "title", "content"], default="all", help="检索范围"
+    )
+    p_search.add_argument(
+        "--order", choices=["date", "score"], default="date", help="date=按时间，score=相关度"
+    )
+    p_search.add_argument("--since", default=None, help="起始日期 YYYY-MM-DD")
+    p_search.add_argument("--until", default=None, help="截止日期 YYYY-MM-DD")
+    p_search.add_argument("--limit", type=int, default=20)
+    p_search.set_defaults(func=cmd_search)
 
     return parser
 

@@ -15,6 +15,7 @@ uv run muc-notice-engine run                          # 启动服务（REST + �
 uv run muc-notice-engine poll --source muc_tzgg       # 立即抓取一轮
 uv run muc-notice-engine sources                      # 列出 32 个来源
 uv run muc-notice-engine rss                          # 生成 RSS 文件
+uv run muc-notice-engine search --site xingong --keyword 推免   # 远程检索（AOP，不写库）
 uv run ruff check . && uv run pytest                  # 提交前：先 lint 再测试
 uv run pytest tests/test_storage.py::test_upsert_is_deduplicating   # 跑单个测试
 ```
@@ -37,6 +38,7 @@ uv run pytest tests/test_storage.py::test_upsert_is_deduplicating   # 跑单个�
 | 去重/查询/存储字段 | `core/storage.py` | `docs/guides/rest-api.md`（查询语义） |
 | 搜索/归档/回填语义 | `core/engine.py` / `core/archive.py` | `docs/guides/rest-api.md` + `docs/architecture.md` |
 | REST 接口/参数 | `transport/api.py` | `docs/guides/rest-api.md` + `README.md` 接口表 |
+| 远程检索/站点目录（AOP） | `core/aop.py` | `docs/reference/aop-search.md` + `docs/guides/rest-api.md` |
 | webhook 负载/签名 | `transport/publishers.py` | `README.md` |
 | 配置项 | `config.py` + `config.example.toml` + `.env.example` | `docs/guides/rest-api.md`（影响使用时） |
 

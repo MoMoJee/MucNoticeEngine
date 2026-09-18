@@ -6,6 +6,7 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 
 from muc_notice_engine.config import Settings
+from muc_notice_engine.core.aop import AOP_SITES, AopSearchHit, AopSearchResult
 from muc_notice_engine.core.archive import ArchiveStore
 from muc_notice_engine.core.engine import NoticeEngine
 from muc_notice_engine.core.fetcher import CHINA_TZ
@@ -62,7 +63,7 @@ class _RecordingArchiver:
 
 
 def _client(tmp_path, token: str = "", store=None, archive_store=None,
-            archiver=None, fetcher=None):
+            archiver=None, fetcher=None, aop_client=None):
     settings = Settings(data_dir=tmp_path, db_path=tmp_path / "t.db", api_token=token)
     store = store or NoticeStore(settings.db_path)
     subscribers = SubscriberStore(settings.db_path)
@@ -75,6 +76,7 @@ def _client(tmp_path, token: str = "", store=None, archive_store=None,
         fetcher=fetcher,
         subscribers=subscribers,
         archive_store=archive_store,
+        aop_client=aop_client,
     )
     return TestClient(app)
 
@@ -251,3 +253,75 @@ async def test_content_preview_fallback(tmp_path):
     assert resp.status_code == 200
     assert resp.headers["x-muc-content"] == "preview"
     assert "预览正文" in resp.text
+
+
+class _StubAopClient:
+    def __init__(self):
+        self.calls = []
+
+    async def search(self, site, keyword, **kwargs):
+        self.calls.append((site.key, keyword, kwargs))
+        return AopSearchResult(
+            site=site,
+            hits=[
+                AopSearchHit(
+                    title="关于推免的通知",
+                    link="https://lxy.muc.edu.cn/info/1/2.htm",
+                    published_at=datetime(2026, 9, 18, tzinfo=CHINA_TZ),
+                    column=1098,
+                    column_name="学院动态",
+                    owner=site.owner,
+                    owner_name=site.name,
+                    external_id="1:1098:2",
+                )
+            ],
+            remote_total=5,
+            scanned=5,
+        )
+
+
+def test_search_sites_endpoint(tmp_path):
+    resp = _client(tmp_path).get("/api/search/sites")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] == len(AOP_SITES)
+    assert {site["key"] for site in body["sites"]} == {s.key for s in AOP_SITES}
+
+
+def test_search_endpoint_returns_hits(tmp_path):
+    stub = _StubAopClient()
+    client = _client(tmp_path, aop_client=stub)
+
+    resp = client.get(
+        "/api/search",
+        params={
+            "site": "lxy",
+            "q": "推免",
+            "match": "all",
+            "exclude": "名单",
+            "scope": "title",
+            "order": "score",
+            "since": "2026-09-01",
+            "until": "2026-09-30",
+            "limit": 5,
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["site"]["key"] == "lxy"
+    assert body["count"] == 1
+    assert body["remote_total"] == 5
+    assert body["hits"][0]["link"] == "https://lxy.muc.edu.cn/info/1/2.htm"
+    assert body["query"]["match"] == "all"
+    key, keyword, kwargs = stub.calls[0]
+    assert key == "lxy"
+    assert keyword == "推免"
+    assert kwargs["exclude"] == "名单"
+    assert kwargs["scope"] == "title"
+    assert kwargs["limit"] == 5
+
+
+def test_search_endpoint_rejects_unknown_site(tmp_path):
+    resp = _client(tmp_path).get("/api/search", params={"site": "nope", "q": "x"})
+    assert resp.status_code == 404

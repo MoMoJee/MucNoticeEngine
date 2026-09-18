@@ -15,6 +15,7 @@ REST API 与 webhook 推送，不依赖任何聊天机器人框架。
   落盘 `data/archive/<source_key>/<external_id>/`，超限按最近访问时间淘汰。
 - 定时轮询；新通知通过 webhook 推送，支持 HMAC-SHA256 签名与来源过滤；回填默认不推送。
 - REST API 查询/搜索/归档，Swagger UI 在 `/docs`。
+- 远程检索：`/api/search` 直连学校 VSB9 全文索引（34 个站点，免登录，不写库）。
 - 可选：matplotlib 生成通知卡片图。
 
 ## 快速开始
@@ -51,6 +52,8 @@ uv run muc-notice-engine run            # 启动服务（默认 http://127.0.0.1
 | GET | `/api/notices/{id}/files` | 落盘文件清单 / 单文件下载 |
 | POST | `/api/notices/{id}/archive` | 强制归档一条（绕过时间窗） |
 | GET | `/api/stats` | 按来源统计 |
+| GET | `/api/search/sites` | 可检索站点目录（AOP 智能搜索） |
+| GET | `/api/search` | 远程全文检索（`site` `q` `match` `exclude` `scope` `order` `since` `until` `limit`） |
 | POST | `/api/check` | 立即抓取一轮；带 `type` 时按门户历史回填 |
 | GET | `/api/card.png` | 渲染最近通知卡片（需 `[render]`） |
 | GET | `/api/rss` | 返回生成的 RSS 文件 |
@@ -76,6 +79,7 @@ uv run muc-notice-engine run            # 启动服务（默认 http://127.0.0.1
 
 - 文档入口：[docs/index.md](docs/index.md)
 - 接口参考与历史回填：[docs/guides/rest-api.md](docs/guides/rest-api.md)
+- 部署与运维：[docs/guides/deployment.md](docs/guides/deployment.md)
 - 架构与边界：[docs/architecture.md](docs/architecture.md)
 - 开发规范：[docs/conventions/](docs/conventions/docs.md)
 - 计划 / 变更日志：[docs/plans/](docs/plans/README.md) · [docs/changelog/](docs/changelog/README.md)

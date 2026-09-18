@@ -12,7 +12,7 @@
                  ▼
         core (engine.py 为调度中枢)
                  │
-   auth / fetcher / archive / storage / sources / parsers / models
+   auth / fetcher / archive / storage / sources / parsers / models / aop
 ```
 
 **硬性规则**
@@ -57,11 +57,15 @@ REST 不直接参与推送：查询走 `storage`，手动触发走 `engine.poll_
 `engine.manual_fetch_portal()`，正文/附件读取走已落盘的 `data/archive/`。
 接口参数、查询/归档/回填语义与历史回填步骤见 [guides/rest-api.md](guides/rest-api.md)。
 
+另有只读的远程检索 `/api/search`：走 `core/aop.py`（AOP 智能搜索 JSON 接口），
+不经过 `engine`/`storage`，不写库、不入 RSS、不触发 webhook。
+
 ## 扩展点
 
 | 想扩展 | 做法 |
 | --- | --- |
 | 新来源 | 在 `core/sources.py` 加一条；API 源用 `selector="api:..."` + `requires_auth` |
+| 新远程检索站点 | 在 `core/aop.py` 的 `AOP_SITES` 加一条（owner 提取方法见 reference/aop-search.md） |
 | 新推送目标 | 实现 `Publisher`，在 `cli.cmd_run` 里 `engine.add_publisher(...)` |
 | 新归档后端 | 实现 `Archiver.enqueue`，构造 `NoticeEngine(..., archiver=...)` |
 | 新查询维度 | `storage.query` 加条件 + `transport/api.py` 暴露参数 |

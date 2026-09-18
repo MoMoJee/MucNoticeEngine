@@ -19,6 +19,7 @@
 | [0006](0006-retention-first-seen.md) | 保留期改为按入库时间且默认关闭 | fix |
 | [0007](0007-rss-utf8-charset.md) | RSS 响应补充 charset=utf-8 | fix |
 | [0008](0008-lxy-xingong-sources.md) | 理学院 / 信息工程学院公开来源接入 | feat |
+| [0009](0009-aop-search-api.md) | AOP 智能搜索接口（远程检索） | feat |
 
 ## 模板
 

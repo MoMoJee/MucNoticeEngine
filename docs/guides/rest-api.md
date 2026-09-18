@@ -31,6 +31,8 @@ curl -H 'Authorization: Bearer <token>' http://127.0.0.1:8080/api/notices
 | POST | `/api/notices/{id}/archive` | 强制归档一条（绕过时间窗，202） |
 | POST | `/api/check` | 立即抓取一轮；带 `type` 时按门户历史回填 |
 | GET | `/api/stats` | 按来源统计（总数/已推送/最新时间） |
+| GET | `/api/search/sites` | 可检索站点目录（AOP 智能搜索） |
+| GET | `/api/search` | 远程全文检索（`site`/`q`/`match`/`exclude`/`scope`/`order`/`since`/`until`/`limit`） |
 | GET | `/api/rss` | 返回生成的 RSS 文件 |
 | GET | `/api/card.png` | 通知卡片图（需 `[render]` 可选依赖） |
 | GET/POST/DELETE | `/api/subscribers` | webhook 订阅管理 |
@@ -56,6 +58,33 @@ curl 'http://127.0.0.1:8080/api/notices?q=%E6%99%BA%E6%85%A7%E6%A0%A1%E5%9B%AD'
 - `q` 作用在数据库字段 `title` / `summary` / `content`（`content` 只有前 2000 字预览）；
   输入里的 `%`、`_` 按字面处理，不当通配符。
 - 搜不到的词可能在附件或归档原文里——本接口不解析这些文件。
+
+## 远程检索（AOP 智能搜索）
+
+不查本地库，直接检索学校 VSB9 站点的全文索引（免登录）。站点目录见
+`GET /api/search/sites`；协议细节、站点 owner 目录与实测限制见
+[reference/aop-search.md](../reference/aop-search.md)。
+
+| 参数 | 取值 | 说明 |
+| --- | --- | --- |
+| `site` | 站点 key（如 `xingong`、`lxy`） | 也接受 owner/host/名称；未知返回 404 |
+| `q` | 关键词，空格分隔 | 必填 |
+| `match` | `all` / `any`（默认 `any`） | 全部命中 / 任意命中 |
+| `exclude` | 空格分隔 | **本地过滤**：标题/摘要命中任一词则剔除 |
+| `scope` | `all` / `title` / `content` | 检索范围 |
+| `order` | `date` / `score` | 按时间 / 相关度 |
+| `since`、`until` | `YYYY-MM-DD` | 可只给一端 |
+| `limit` | 1–100（默认 20） | 返回条数 |
+
+```bash
+curl 'http://127.0.0.1:8080/api/search?site=xingong&q=%E6%8E%A8%E5%85%8D&match=all&exclude=%E5%90%8D%E5%8D%95'
+```
+
+- 响应里 `remote_total` 是远端命中总数，`count` 是本地过滤/截断后实际返回数；
+  `truncated=true` 表示扫描到上限（默认 200 条）仍未凑满 `limit`。
+- **不写库**：不新增通知、不入 RSS、不触发 webhook；需要沉淀时用公开源或 `POST /api/check` 回填。
+- 站点高级搜索的「不包含」语法在远端不可靠，故由 `exclude` 本地实现；每次最多扫描
+  200 条、页间约 0.2s 间隔，避免给对方站点压力。
 
 ## 正文与附件
 

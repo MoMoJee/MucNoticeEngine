@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from ..config import Settings
+from ..core.aop import AOP_SITES, AopSearchClient, resolve_site
 from ..core.archive import ArchiveStore, safe_filename
 from ..core.engine import NoticeEngine
 from ..core.fetcher import CHINA_TZ, MucRssService
@@ -54,12 +55,14 @@ def create_app(
     fetcher: MucRssService,
     subscribers: SubscriberStore,
     archive_store: ArchiveStore | None = None,
+    aop_client: AopSearchClient | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="MucNoticeEngine",
         version="0.1.0",
         description="中央民族大学多站点通知聚合 / 存储 / 去重引擎",
     )
+    search_client = aop_client or AopSearchClient()
 
     def require_token(authorization: str = Header(default="")) -> None:
         if not settings.api_token:
@@ -275,6 +278,53 @@ def create_app(
     @app.get("/api/stats", dependencies=[auth])
     async def stats() -> dict:
         return {"sources": await store.stats()}
+
+    # ---------------- 远程检索（AOP 智能搜索，不写库） ----------------
+
+    @app.get("/api/search/sites", dependencies=[auth])
+    async def search_sites() -> dict:
+        return {"count": len(AOP_SITES), "sites": [site.to_dict() for site in AOP_SITES]}
+
+    @app.get("/api/search", dependencies=[auth])
+    async def remote_search(
+        site: str = Query(..., description="站点 key（也接受 owner/host/名称），见 /api/search/sites"),
+        q: str = Query(..., min_length=1, description="关键词，空格分隔"),
+        match: str = Query("any", pattern="^(all|any)$", description="all=全部关键词，any=任意一个"),
+        exclude: str | None = Query(None, description="空格分隔；标题/摘要命中任一词则本地排除"),
+        scope: str = Query("all", pattern="^(all|title|content)$", description="检索范围"),
+        order: str = Query("date", pattern="^(date|score)$", description="date=按时间，score=按相关度"),
+        since: str | None = Query(None, description="起始日期 YYYY-MM-DD"),
+        until: str | None = Query(None, description="截止日期 YYYY-MM-DD"),
+        limit: int = Query(20, ge=1, le=100),
+    ) -> dict:
+        target = resolve_site(site)
+        if target is None:
+            raise HTTPException(status_code=404, detail=f"unknown site: {site}")
+        try:
+            result = await search_client.search(
+                target,
+                q,
+                match=match,
+                exclude=exclude,
+                scope=scope,
+                order=order,
+                since=since,
+                until=until,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        payload = result.to_dict()
+        payload["query"] = {
+            "q": q,
+            "match": match,
+            "scope": scope,
+            "order": order,
+            "exclude": exclude or "",
+            "since": since or "",
+            "until": until or "",
+        }
+        return payload
 
     # ---------------- 触发抓取 ----------------
 

@@ -17,9 +17,11 @@
 | [index.md](index.md) | 文档入口、目录结构、阅读顺序 | 新增/删除文档时 |
 | [architecture.md](architecture.md) | 模块边界、数据流、扩展点 | 模块边界或数据流变化时 |
 | [guides/rest-api.md](guides/rest-api.md) | REST 接口参考、查询/归档/回填语义、历史回填步骤 | 接口/参数/使用语义变化时 |
+| [guides/deployment.md](guides/deployment.md) | 生产机部署位置、更新流程、运维命令 | 部署方式/生产机变化时 |
 | [conventions/docs.md](conventions/docs.md) | 文档命名、计划/变更日志写作规范、防过期规则 | 规范本身变化时 |
 | [conventions/git.md](conventions/git.md) | 提交流程、commit message 规范（参照首次提交） | 流程变化时 |
 | [reference/portal-notice-types.md](reference/portal-notice-types.md) | 门户通知 type 枚举与归类（含 CSV） | 门户分类变化时 |
+| [reference/aop-search.md](reference/aop-search.md) | AOP 智能搜索协议、参数语义、34 个站点 owner 目录 | 接口/站点目录变化时 |
 | [plans/](plans/README.md) | 开发计划（先计划后实现） | 每个功能开发前 |
 | [changelog/](changelog/README.md) | 已交付变更说明 | 每次交付时 |
 
@@ -37,6 +39,7 @@ src/muc_notice_engine/
 │   ├── parsers.py       # HTML -> 标题 解析函数
 │   ├── auth.py          # SM2 登录 + Cookie 持久化
 │   ├── fetcher.py       # 抓取 HTML/API、详情正文与附件，生成 Notice 与 RSS
+│   ├── aop.py           # AOP 智能搜索：远程检索 + 34 站点 owner 目录
 │   ├── archive.py       # 正文/附件落盘 + 后台队列 + LRU 淘汰
 │   ├── storage.py       # SQLite 存储 + 去重 + assets/meta
 │   ├── engine.py        # 轮询调度 + Publisher / Archiver 协议
@@ -60,6 +63,7 @@ tests/                                  # pytest
 | 改去重、查询、存储字段 | `core/storage.py`（改 schema 需同步 changelog 的迁移说明） |
 | 改轮询或新增事件消费者 | `core/engine.py`（实现 `Publisher` / `Archiver` 协议） |
 | 加/改 REST 接口或参数 | `transport/api.py` + 同步 [guides/rest-api.md](guides/rest-api.md) 与 README 接口表 |
+| 改远程检索/站点目录（AOP） | `core/aop.py` + 同步 [reference/aop-search.md](reference/aop-search.md) |
 | 改 webhook 负载/签名 | `transport/publishers.py` + 同步 README |
 | 改配置项 | `config.py` + `config.example.toml` + `.env.example` |
 
