@@ -6,16 +6,19 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import tempfile
+import zipfile
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from ..config import Settings
+from ..core.archive import ArchiveStore, safe_filename
 from ..core.engine import NoticeEngine
 from ..core.fetcher import CHINA_TZ, MucRssService
 from ..core.models import Notice
@@ -34,6 +37,15 @@ class SubscriberIn(BaseModel):
     )
 
 
+class CheckIn(BaseModel):
+    source: str | None = Field(None, description="逗号分隔的 source_key")
+    type: int | None = Field(None, description="门户 type；给了就按门户历史抓取")
+    from_page: int = Field(1, ge=1)
+    to_page: int = Field(1, ge=1)
+    search_value: str | None = Field(None, description="门户 searchValue 关键词")
+    backfill: bool = Field(True, description="仅普通轮询有效；回填默认不推送")
+
+
 def create_app(
     *,
     engine: NoticeEngine,
@@ -41,6 +53,7 @@ def create_app(
     settings: Settings,
     fetcher: MucRssService,
     subscribers: SubscriberStore,
+    archive_store: ArchiveStore | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="MucNoticeEngine",
@@ -57,11 +70,17 @@ def create_app(
 
     auth = Depends(require_token)
 
+    def archived_path(notice: Notice, filename: str):
+        if archive_store is None:
+            return None
+        path = archive_store.notice_dir(notice) / filename
+        return path if path.is_file() else None
+
     # ---------------- 基础 ----------------
 
     @app.get("/health")
     async def health() -> dict:
-        return {
+        payload = {
             "status": "ok",
             "source_count": len(SOURCES),
             "notice_count": await store.count(),
@@ -70,7 +89,14 @@ def create_app(
             else None,
             "last_new_count": engine.last_new_count,
             "server_time": datetime.now(CHINA_TZ).isoformat(),
+            "archive_enabled": archive_store is not None,
         }
+        if archive_store is not None:
+            payload["archive"] = {
+                "pending": engine.archive_pending,
+                "total_bytes": await store.total_asset_size(),
+            }
+        return payload
 
     @app.get("/api/sources", dependencies=[auth])
     async def list_sources() -> list[dict]:
@@ -115,7 +141,117 @@ def create_app(
         notice = await store.get(notice_id)
         if notice is None:
             raise HTTPException(status_code=404, detail="notice not found")
+        await store.touch_assets(notice_id)
         return notice.to_dict()
+
+    # ---------------- 正文 / 附件 ----------------
+
+    @app.get("/api/notices/{notice_id}/content", dependencies=[auth])
+    async def get_notice_content(notice_id: str):
+        notice = await store.get(notice_id)
+        if notice is None:
+            raise HTTPException(status_code=404, detail="notice not found")
+        await store.touch_assets(notice_id)
+
+        path = archived_path(notice, "content.html")
+        if path is not None:
+            return FileResponse(path, media_type="text/html; charset=utf-8")
+
+        if notice.content:
+            body = (
+                "<!doctype html><meta charset='utf-8'>"
+                f"<h1>{html.escape(notice.title)}</h1>"
+                f"<pre>{html.escape(notice.content)}</pre>"
+            )
+            return HTMLResponse(
+                body, headers={"X-Muc-Content": "preview"}
+            )
+        raise HTTPException(status_code=404, detail="content not archived yet")
+
+    @app.get("/api/notices/{notice_id}/content.zip", dependencies=[auth])
+    async def get_notice_content_zip(notice_id: str):
+        notice = await store.get(notice_id)
+        if notice is None:
+            raise HTTPException(status_code=404, detail="notice not found")
+        await store.touch_assets(notice_id)
+
+        directory = archive_store.notice_dir(notice) if archive_store else None
+        if directory is None or not (directory / "content.html").is_file():
+            raise HTTPException(status_code=404, detail="content not archived yet")
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="muc_content_")
+        os.close(fd)
+        try:
+            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as bundle:
+                for filename in ("content.html", "content.txt", "meta.json"):
+                    candidate = directory / filename
+                    if candidate.is_file():
+                        bundle.write(candidate, arcname=filename)
+                for asset in await store.get_assets(notice_id):
+                    if asset.get("kind") != "attachment":
+                        continue
+                    asset_path = (
+                        archive_store.resolve_local(asset.get("local_path", ""))
+                        if archive_store
+                        else None
+                    )
+                    if asset_path is not None and asset_path.is_file():
+                        bundle.write(
+                            asset_path, arcname=f"files/{asset['filename']}"
+                        )
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+        name = safe_filename(f"{notice.external_id or notice.id}.zip", "notice.zip")
+        return FileResponse(tmp_path, media_type="application/zip", filename=name)
+
+    @app.get("/api/notices/{notice_id}/files", dependencies=[auth])
+    async def list_notice_files(notice_id: str, name: str | None = None):
+        notice = await store.get(notice_id)
+        if notice is None:
+            raise HTTPException(status_code=404, detail="notice not found")
+        await store.touch_assets(notice_id)
+        assets = await store.get_assets(notice_id)
+
+        if name is not None:
+            asset = next((a for a in assets if a.get("filename") == name), None)
+            if asset is None:
+                raise HTTPException(status_code=404, detail="file not found")
+            path = (
+                archive_store.resolve_local(asset.get("local_path", ""))
+                if archive_store
+                else None
+            )
+            if path is None or not path.is_file():
+                raise HTTPException(status_code=404, detail="file missing on disk")
+            return FileResponse(path, filename=asset["filename"])
+
+        return {
+            "notice_id": notice_id,
+            "count": len(assets),
+            "items": [
+                {
+                    "kind": a.get("kind"),
+                    "filename": a.get("filename"),
+                    "size": a.get("size"),
+                    "sha1": a.get("sha1"),
+                    "first_download_at": a.get("first_download_at"),
+                    "last_access_at": a.get("last_access_at"),
+                }
+                for a in assets
+            ],
+        }
+
+    @app.post("/api/notices/{notice_id}/archive", dependencies=[auth], status_code=202)
+    async def archive_notice(notice_id: str) -> dict:
+        notice = await store.get(notice_id)
+        if notice is None:
+            raise HTTPException(status_code=404, detail="notice not found")
+        if engine.archiver is None:
+            raise HTTPException(status_code=409, detail="archive is disabled")
+        await engine.archiver.enqueue(notice, force=True)
+        return {"queued": notice_id}
 
     @app.get("/api/stats", dependencies=[auth])
     async def stats() -> dict:
@@ -124,9 +260,31 @@ def create_app(
     # ---------------- 触发抓取 ----------------
 
     @app.post("/api/check", dependencies=[auth])
-    async def check_now() -> dict:
-        """立即抓取一轮；返回本轮新推送的通知。"""
-        fresh = await engine.poll_once()
+    async def check_now(body: CheckIn | None = None) -> dict:
+        """立即抓取。给了 `type` 就按门户历史（页数区间/关键词）抓取并视为回填。"""
+        if body is not None and body.type is not None:
+            from_page = max(1, body.from_page)
+            to_page = max(from_page, body.to_page)
+            notices = await engine.manual_fetch_portal(
+                body.type,
+                from_page=from_page,
+                to_page=to_page,
+                search_value=body.search_value,
+            )
+            return {
+                "new_count": len(notices),
+                "items": [n.to_dict() for n in notices],
+                "backfill": True,
+            }
+
+        source_keys = (
+            {s.strip() for s in body.source.split(",") if s.strip()}
+            if body is not None and body.source
+            else None
+        )
+        fresh = await engine.poll_once(
+            source_keys, backfill=body.backfill if body is not None else None
+        )
         return {"new_count": len(fresh), "items": [n.to_dict() for n in fresh]}
 
     # ---------------- 卡片渲染（可选）----------------
