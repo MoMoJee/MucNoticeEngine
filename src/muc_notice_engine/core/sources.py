@@ -1,4 +1,4 @@
-"""MUC 通知来源清单（10 个公开源 + 11 个门户类型）。
+"""MUC 通知来源清单（21 个公开源 + 11 个门户类型）。
 
 移植自 astrbot_plugin_MUC_Notices/sources.py。
 新增/修改来源时，只需改这里；抓取逻辑在 fetcher.py 中保持通用。
@@ -120,6 +120,96 @@ SOURCES: list[SourceConfig] = [
         "selector": "h4 a",
         "parser": parse_title_attr,
         "category": "news",
+    },
+    # ========== 理学院 ==========
+    {
+        "key": "lxy_xydt",
+        "name": "理学院 - 学院动态",
+        "url": "https://lxy.muc.edu.cn/xydt1.htm",
+        "selector": 'div.new_list3 dd a[href*="info/"]',
+        "parser": parse_selector_generic,
+        "category": "lxy",
+    },
+    {
+        "key": "lxy_rcpy",
+        "name": "理学院 - 人才培养",
+        "url": "https://lxy.muc.edu.cn/rcpy.htm",
+        "selector": 'div.new_list3 dd a[href*="info/"]',
+        "parser": parse_selector_generic,
+        "category": "lxy",
+    },
+    {
+        "key": "lxy_kxyj",
+        "name": "理学院 - 科学研究",
+        "url": "https://lxy.muc.edu.cn/kxyj.htm",
+        "selector": 'div.new_list3 dd a[href*="info/"]',
+        "parser": parse_selector_generic,
+        "category": "lxy",
+    },
+    # ========== 信息工程学院 ==========
+    {
+        "key": "xg_tzgg",
+        "name": "信息工程学院 - 通知公告",
+        "url": "https://xingong.muc.edu.cn/index/tzgg.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
+    },
+    {
+        "key": "xg_kyjx",
+        "name": "信息工程学院 - 科研教学",
+        "url": "https://xingong.muc.edu.cn/index/kyjx.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
+    },
+    {
+        "key": "xg_jwdt",
+        "name": "信息工程学院 - 教务动态",
+        "url": "https://xingong.muc.edu.cn/index/jwdt.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
+    },
+    {
+        "key": "xg_dthd",
+        "name": "信息工程学院 - 党团活动",
+        "url": "https://xingong.muc.edu.cn/index/dthd.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
+    },
+    {
+        "key": "xg_xyxw",
+        "name": "信息工程学院 - 学院新闻",
+        "url": "https://xingong.muc.edu.cn/index/xyxw.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
+    },
+    {
+        "key": "xg_yjszs",
+        "name": "信息工程学院 - 研究生招生",
+        "url": "https://xingong.muc.edu.cn/zsjy/yjszs.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
+    },
+    {
+        "key": "xg_bksjx",
+        "name": "信息工程学院 - 本科生教学",
+        "url": "https://xingong.muc.edu.cn/jyjx/bksjx.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
+    },
+    {
+        "key": "xg_zyrz",
+        "name": "信息工程学院 - 专业认证",
+        "url": "https://xingong.muc.edu.cn/jyjx/zyrz.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": parse_selector_generic,
+        "category": "xingong",
     },
     # ========== 信息门户 - 需登录（API，全量有效 type）==========
     _portal_source("my_xhw", "信息门户 - 新华网", 1, "news"),

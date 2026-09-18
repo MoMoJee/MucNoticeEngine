@@ -61,8 +61,12 @@ ARTICLE_SELECTORS = (
     ".wp_articlecontent",
     "#zoom",
     ".news_content",
+    "#js_content",
     "article",
 )
+
+# onclick="opennews('...')" / onclick='opennews("...")' 里的首个引号字符串。
+ONCLICK_URL_PATTERN = re.compile(r"""['"]([^'"]+)['"]""")
 
 
 def _as_int(value: Any) -> int:
@@ -265,15 +269,13 @@ class MucRssService:
                 if not isinstance(tag, Tag):
                     continue
 
-                href = (tag.get("href") or "").strip()
-                if not href:
-                    continue
-
                 title = source["parser"](tag).strip()
                 if not title:
                     continue
 
-                full_url = urljoin(page_url, href)
+                full_url = self._resolve_link(tag, page_url)
+                if not full_url:
+                    continue
                 if full_url in seen_links:
                     continue
 
@@ -698,6 +700,19 @@ class MucRssService:
         if slug:
             return slug[:120].rstrip("-.")
         return sha1(link.encode()).hexdigest()[:16]
+
+    def _resolve_link(self, tag: Tag, page_url: str) -> str:
+        """取条目链接：href 缺失或为 javascript: 时，退回 onclick 内首个引号字符串。
+
+        信工学院等 VSB9 站点用 onclick="opennews('info/...')" 承载真实链接。
+        """
+        href = (tag.get("href") or "").strip()
+        if not href or href.lower().startswith("javascript:"):
+            match = ONCLICK_URL_PATTERN.search(str(tag.get("onclick") or ""))
+            href = match.group(1).strip() if match else ""
+        if not href or href.lower().startswith("javascript:"):
+            return ""
+        return urljoin(page_url, href)
 
     def _request_headers(
         self, source: SourceConfig, request_url: str | None = None

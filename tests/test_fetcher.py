@@ -148,6 +148,68 @@ async def test_public_detail_extracts_article(tmp_path, monkeypatch):
     assert detail.attachments == []
 
 
+async def test_public_source_resolves_onclick_links(tmp_path):
+    html = (
+        "<html><body><ul class='ulminheight'>"
+        "<li><span class='news__title'><a href='javascript:void(0)' "
+        "onclick=\"opennews('../info/1041/6535.htm')\">推免成绩公示</a></span>"
+        "<span class='news__date'>[2026年09月18日]</span></li>"
+        "<li><span class='news__title'><a href='../info/1041/6505.htm'>复试名单</a>"
+        "</span><span class='news__date'>[2026-09-14]</span></li>"
+        "<li><span class='news__title'><a href='javascript:void(0)'>无链接</a>"
+        "</span></li>"
+        "</ul></body></html>"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=html)
+
+    source = {
+        "key": "xg_test",
+        "name": "信工测试",
+        "url": "https://xingong.muc.edu.cn/index/tzgg.htm",
+        "selector": "ul.ulminheight .news__title a",
+        "parser": lambda tag: tag.get_text(" ", strip=True),
+        "category": "xingong",
+    }
+    service = _service(tmp_path)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        notices = await service._fetch_source_notices(client, source)
+
+    assert [n.link for n in notices] == [
+        "https://xingong.muc.edu.cn/info/1041/6535.htm",
+        "https://xingong.muc.edu.cn/info/1041/6505.htm",
+    ]
+    assert [n.date for n in notices] == ["2026-09-18 00:00", "2026-09-14 00:00"]
+
+
+async def test_public_source_parses_lxy_list(tmp_path):
+    html = (
+        "<div class='new_list3'><dl><dd>"
+        "<a class='fl' href='info/1098/3253.htm'>复试成绩公示</a>"
+        "<span class='fr gray'>2026年09月14日</span></dd></dl></div>"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=html)
+
+    source = {
+        "key": "lxy_test",
+        "name": "理学院测试",
+        "url": "https://lxy.muc.edu.cn/xydt1.htm",
+        "selector": 'div.new_list3 dd a[href*="info/"]',
+        "parser": lambda tag: tag.get_text(" ", strip=True),
+        "category": "lxy",
+    }
+    service = _service(tmp_path)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        notices = await service._fetch_source_notices(client, source)
+
+    assert len(notices) == 1
+    assert notices[0].link == "https://lxy.muc.edu.cn/info/1098/3253.htm"
+    assert notices[0].date == "2026-09-14 00:00"
+
+
 def _notice(i: int) -> Notice:
     return Notice(
         id=f"test:{i}",

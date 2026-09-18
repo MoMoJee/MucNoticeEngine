@@ -2,8 +2,12 @@ from muc_notice_engine.core.sources import PORTAL_TYPES, SOURCES, resolve_source
 
 
 def test_source_count():
-    assert len(SOURCES) == 21
+    assert len(SOURCES) == 32
     assert len(PORTAL_TYPES) == 11
+
+
+def test_public_source_count():
+    assert len([s for s in SOURCES if not s.get("requires_auth", False)]) == 21
 
 
 def test_portal_types_cover_all_valid():

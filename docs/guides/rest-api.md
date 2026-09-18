@@ -22,7 +22,7 @@ curl -H 'Authorization: Bearer <token>' http://127.0.0.1:8080/api/notices
 | --- | --- | --- |
 | GET | `/` | 引导页，链接到 `/docs` |
 | GET | `/health` | 健康检查 + 归档队列状态（始终公开） |
-| GET | `/api/sources` | 来源列表（21 个：10 公开 + 11 门户 type） |
+| GET | `/api/sources` | 来源列表（32 个：21 公开 + 11 门户 type） |
 | GET | `/api/notices` | 查询通知（`source`/`category`/`since`/`q`/`limit`/`offset`） |
 | GET | `/api/notices/{id}` | 单条通知 |
 | GET | `/api/notices/{id}/content` | 正文 HTML（已归档原文，或 2000 字预览） |

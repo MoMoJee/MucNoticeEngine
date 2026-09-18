@@ -13,7 +13,7 @@
 uv sync --extra dev                                  # 安装（Python >=3.11）
 uv run muc-notice-engine run                          # 启动服务（REST + 轮询 + webhook）
 uv run muc-notice-engine poll --source muc_tzgg       # 立即抓取一轮
-uv run muc-notice-engine sources                      # 列出 21 个来源
+uv run muc-notice-engine sources                      # 列出 32 个来源
 uv run muc-notice-engine rss                          # 生成 RSS 文件
 uv run ruff check . && uv run pytest                  # 提交前：先 lint 再测试
 uv run pytest tests/test_storage.py::test_upsert_is_deduplicating   # 跑单个测试

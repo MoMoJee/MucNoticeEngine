@@ -61,3 +61,30 @@
    [changelog/0004](../changelog/0004-portal-pagination-attachments.md)。
 
 > 这些 type 数字是门户内部编码，非官方文档；学校可能调整，接入后需定期校验。
+
+## 院系公开来源：理学院 / 信息工程学院（2026-09-19 接入）
+
+两站均为博达 Visual SiteBuilder 9（VSB9），列表页为静态 HTML，已按常规公开源接入
+（见 `core/sources.py`，分类 `lxy` / `xingong`）：
+
+- 理学院：`div.new_list3 dd a[href*="info/"]`；日期在 `span.fr.gray`，
+  格式 `YYYY年MM月DD日` 或 `YYYY-MM-DD`（`xydt1.htm` / `rcpy.htm` / `kxyj.htm`）。
+- 信息工程学院：`ul.ulminheight .news__title a`；日期在 `span.news__date`，
+  格式 `[YYYY年MM月DD日]` 或 `[YYYY-MM-DD]`（tzgg / kyjx / jwdt / dthd / xyxw / yjszs / bksjx / zyrz）。
+- 信工多条链接为 `href="javascript:void(0)" onclick="opennews('…')"`；
+  `fetcher._resolve_link` 在 href 缺失或为 `javascript:` 时从 onclick 取首个引号字符串。
+- 微信外链条目正文容器为 `#js_content`，已加入 `ARTICLE_SELECTORS`；详情仍可能被微信反爬拦截。
+- 两站首页不单独接入（与栏目页重复）；`rcpy.htm` 的受限 `content.jsp` 链接被选择器排除。
+- 分页：理学院 `xydt1/1.htm`、信工 `index/tzgg/2.htm`；默认只抓首页，需要时加 `extra_urls`。
+
+### AOP 智能搜索接口（调研结论，未接入）
+
+两站共用同一套免登录搜索接口（`/views/search/modules/resultpc/js/soso.js`）：
+
+- `POST https://<site>/aop_component/webber/search/search/search/queryPage`
+- 请求头：`Authorization: tourist`、`owner: <站点 owner>`；JSON body 需含
+  `aliasName/article`、`auditing`、`token`、`urlPrefix`、`page` 等字段。
+- 实测 owner：信工 `1499287359`、理学院 `1686112499`；`columnId` 可过滤栏目；
+  `keyWord` 为空返回 0 条，不能用于枚举栏目历史。
+- 响应 `data.page.records[]`：`collapseTitle`（纯文本）、`url`、`createDate`、`column`、`intro`、`content`。
+- 详细的接入设计见 [plans/0008](../plans/0008-lxy-xingong-sources.md)（阶段二）。

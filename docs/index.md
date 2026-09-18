@@ -33,7 +33,7 @@ src/muc_notice_engine/
 ├── cli.py               # argparse 入口：run / poll / sources / rss
 ├── core/                # 核心引擎（禁止 import transport / 第三方 Web 框架）
 │   ├── models.py        # Notice / Attachment / NoticeDetail / SourceConfig
-│   ├── sources.py       # 21 个来源配置（10 公开 + 11 门户 type；新增来源改这里）
+│   ├── sources.py       # 32 个来源配置（21 公开 + 11 门户 type；新增来源改这里）
 │   ├── parsers.py       # HTML -> 标题 解析函数
 │   ├── auth.py          # SM2 登录 + Cookie 持久化
 │   ├── fetcher.py       # 抓取 HTML/API、详情正文与附件，生成 Notice 与 RSS
