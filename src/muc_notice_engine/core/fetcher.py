@@ -75,7 +75,6 @@ class MucRssService:
         self, source_keys: set[str] | None = None
     ) -> list[Notice]:
         timeout_sec = self.settings.request_timeout_seconds
-        max_items = self.settings.rss_max_items
         selected_sources = [
             source
             for source in SOURCES
@@ -181,7 +180,7 @@ class MucRssService:
             key=lambda item: (item.published_at, item.source),
             reverse=True,
         )
-        return ordered[:max_items]
+        return ordered
 
     async def write_rss(self, notices: list[Notice]) -> None:
         now_str = datetime.now(CHINA_TZ).strftime("%a, %d %b %Y %H:%M:%S +0800")
@@ -193,7 +192,7 @@ class MucRssService:
         ET.SubElement(channel, "description").text = "中央民族大学多来源通知聚合"
         ET.SubElement(channel, "lastBuildDate").text = now_str
 
-        for notice in notices:
+        for notice in notices[: self.settings.rss_max_items]:
             item = ET.SubElement(channel, "item")
             ET.SubElement(item, "title").text = f"[{notice.source}] {notice.title}"
             ET.SubElement(item, "link").text = notice.link
@@ -207,7 +206,12 @@ class MucRssService:
         path = self.rss_file_path
         path.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(path.write_bytes, xml_data)
-        logger.info("[RSS] RSS 文件已更新 %s items=%d", path, len(notices))
+        logger.info(
+            "[RSS] RSS 文件已更新 %s items=%d（上限 %d）",
+            path,
+            min(len(notices), self.settings.rss_max_items),
+            self.settings.rss_max_items,
+        )
 
     async def _fetch_source_notices(
         self, client: httpx.AsyncClient | None, source: SourceConfig
@@ -252,8 +256,7 @@ class MucRssService:
                 if not title:
                     continue
 
-                base_url = source.get("base_url") or page_url
-                full_url = urljoin(base_url, href)
+                full_url = urljoin(page_url, href)
                 if full_url in seen_links:
                     continue
 
@@ -473,7 +476,7 @@ class MucRssService:
         self, source: SourceConfig, request_url: str | None = None
     ) -> dict[str, str]:
         headers = dict(DEFAULT_HEADERS)
-        headers["Referer"] = source.get("base_url") or request_url or source["url"]
+        headers["Referer"] = request_url or source["url"]
         return headers
 
     async def enrich_contents(self, notices: list[Notice], limit: int = 15) -> None:

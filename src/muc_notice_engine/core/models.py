@@ -21,7 +21,6 @@ class SourceConfig(TypedDict, total=False):
     selector: str
     parser: Parser
     category: str
-    base_url: str
     requires_auth: bool
     api_params: dict
     extra_urls: list[str]
