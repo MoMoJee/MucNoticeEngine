@@ -97,14 +97,25 @@
 
 ## 方案（设计，暂不实现）
 
+> 职责拆分原则：**发现附件（门户特有）留 fetcher，下载/落盘（与来源无关）放独立模块，引擎只做编排。**
+
 - **配置新增**：`portal_page_limit`（每类翻页上限，默认 3）、`archive_enable`（默认 true）、`archive_dir`（默认 `data/archive`）、`archive_download_files`、`archive_max_file_mb`、`archive_max_per_notice`。
-- **fetcher**：
+- **数据模型**（`core/models.py`）：
+  - `Attachment(notice_id, annex_id, name, suffix, kind)`，`kind ∈ {file, image, link}`。
+  - `NoticeDetail(notice, content_html, attachments)`。
+- **fetcher —— 只负责「发现」，不碰文件系统**：
   - 门户来源按 `currentPage` 循环到 `pageLimit` 或 `totalCounts`。
-  - 门户通知：对**新通知**调用 `getNotice` 取完整 `notice_content` 与 `notice_annext`（附件列表）。
+  - 新增 `async def fetch_detail(notice) -> NoticeDetail | None`：门户调 `getNotice` 取完整 `notice_content` 与 `notice_annext`；公开源抓正文 HTML。
   - 修正 `grs_yjszs` 的 URL 拼接。
-  - 新增 `archive_notice(notice)`：落盘正文 HTML/文本、按 `notice_annext` 逐个 `download`（带认证）保存附件、写 `meta.json`；校验 `content-disposition`，HTML 响应视为失败跳过。
-  - 注意：详情接口 + 下载是**额外请求**，需限速并只对新通知执行。
-- **storage**：`notices` 增加 `archive_dir`（或 `has_archive`）；附件清单可存 JSON 字段或新表 `attachments(notice_id, kind, url, local_path, filename, size, sha1)`。**不存正文全文**。
+- **新增 `core/archive.py` —— 只负责「取存」**：
+  - `ArchiveStore(settings, auth_service)`：目录布局、文件名安全化、单文件大小上限、sha1、原子写、`meta.json`、限速/并发。
+  - `async def archive(detail) -> ArchiveResult`：落盘 `content.html` / `content.txt`，遍历 `attachments` 调 `download` 存入 `files/`，返回已存清单（含失败项）。
+  - `async def download(att, dest_dir) -> Path | None`：带认证 GET，校验 `content-disposition`（返回 HTML 登录页视为失败），逐项失败跳过。
+  - 与来源无关：门户/公开源共用；不得 import transport。
+- **engine —— 只负责「编排」**：
+  - 定义 `Archiver` 协议（与 `Publisher` 同款解耦）：`async def archive(self, detail: NoticeDetail) -> ArchiveResult | None`。
+  - `poll_once` 去重后，只对**新通知**调用 `archiver.archive(...)`；`archive_enable=False` 时不注入。
+- **storage**：`notices` 增加 `archive_dir`；新表 `attachments(notice_id, annex_id, name, suffix, kind, local_path, size, sha1)`；由 storage 落库（ArchiveStore 只返回结果，不直接写库）。**不存正文全文**。
 - **sources**：新增 `type=11` 公示公告（带关键词过滤）、可选 `type=10` 就业信息；新增 source 级 `title_include` / `title_exclude`（复用 `parsers.py` 中已有的关键词函数）。
 - **transport**：`GET /api/notices/{id}/content`、`GET /api/notices/{id}/files`；REST `q` 可扩展为标题+正文搜索（可后置）。
 - **目录结构**：
@@ -119,10 +130,11 @@ data/archive/<source_key>/<notice_id>/
 
 ## 影响面
 
-- core：`fetcher.py`、`storage.py`、`models.py`、`sources.py`、`config.py`
+- core：**新增 `archive.py`**；改 `fetcher.py`、`engine.py`、`models.py`、`storage.py`、`sources.py`、`config.py`
 - transport：`api.py`
 - 配置：`config.example.toml`
-- 数据/schema：`notices` 加列 / 新增 `attachments` 表（无迁移框架，需人工或重建）
+- 文档：`docs/architecture.md`（新增归档模块与数据流）
+- 数据/schema：`notices` 加列 + 新增 `attachments` 表（无迁移框架，需人工或重建）
 
 ## 风险与备选
 
@@ -131,7 +143,7 @@ data/archive/<source_key>/<notice_id>/
 
 ## 验证方式
 
-- 单元：翻页解析 `page` 元数据；解析 `notice_annext`；归档落盘用离线 fixture。
+- 单元：翻页解析 `page` 元数据；`fetch_detail` 解析 `notice_annext`；`ArchiveStore` 用「mock HTTP + 离线 fixture」验证落盘、文件名安全化、HTML 响应判失败（不需要真实登录）。
 - 集成：对 `notice_id=358513` 走 `getNotice` → 下载 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`（实测带 Cookie 可 200 + `content-disposition`，27391 字节）。
 - 集成：对 `type=6/11` 抓多页，确认 9/9、9/10 名额分配通知入库且附件归档成功。
 - REST：`GET /api/notices/{id}/files` 能列出并取到本地文件。
@@ -141,6 +153,9 @@ data/archive/<source_key>/<notice_id>/
 - [ ] 修复 `grs_yjszs` URL 拼接
 - [ ] 门户翻页 + `portal_page_limit` 配置
 - [ ] 接入 `type=11` / `type=10` + 关键词过滤
-- [ ] 正文/附件归档模块 + 配置项
-- [ ] storage 加列/建表 + REST 文件接口
+- [ ] 模型：`Attachment` / `NoticeDetail`
+- [ ] fetcher：`fetch_detail`（发现正文与附件，不落盘）
+- [ ] `core/archive.py`：`ArchiveStore`（下载/落盘/校验）+ `Archiver` 协议
+- [ ] engine：对新通知编排归档
+- [ ] storage：`archive_dir` + `attachments` 表 + REST 文件接口
 - [ ] 测试与文档（changelog、architecture、config 示例）
