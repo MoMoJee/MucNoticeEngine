@@ -34,6 +34,11 @@
 - 抽样 5 类 × 10 条：**44% 通知带文件附件**（type=6 8/10、type=11 6/10、type=32 6/10）。
 - `notice_content` 内还有**内联图片** `<img>`，本次决定一并下载。
 
+### 手动抓取/搜索能力：补充实测
+- **不支持日期过滤**：尝试 `startTime/endTime`、`beginTime/endTime`、`startDate/endDate`、`releaseTimeStart/End`、`startReleaseTime/endReleaseTime`、`timeStart/timeEnd` 等 10 组参数，`total` 与返回结果均不变，参数也不回显。→ 历史抓取只能靠**翻页**。
+- **支持关键词**：`searchValue=<kw>` 生效（实测 `推免` 过滤出相关通知），`page.searchValue` 回显。
+- **认证边界 bug**：当 CAS 会话仍有效但 comsys 会话失效时，登录页 GET 返回 302，`_do_login` 把它当异常，导致登录失败（需清 Cookie 才能恢复）。
+
 ## 已确认决策（Decision Log）
 
 1. **`rss_max_items` 只约束 RSS 输出**：`fetch_notices` 不再截断，改由 `write_rss` 内部截断。抓取/存储/归档/推送不受它限制。
@@ -50,6 +55,11 @@
 12. **`enrich_contents` 与 `fetch_detail` 合并**为单一正文抓取路径（废弃旧方法）。
 13. 执行前述安全/运维项：`/files` 防路径穿越、未配置账号时匿名回退、下载与列表共用会话的失效处理。
 14. **回填不推送（默认开启）**：**首次启动的首轮抓取**以及**手动抓取历史**视为「回填」，只入库 + 按时间窗归档，默认**不触发 webhook 推送**；可通过 `backfill_push`（默认 `false`）开启。正常轮询产生的新通知照常推送。回填状态需持久化（首轮标记），手动抓取在请求中显式标记为回填。
+15. **手动历史抓取用页数区间**：list 接口**不支持日期过滤**（已实测），改用 `type` + `from_page`/`to_page`；同时接口支持 `searchValue` 关键词过滤，可用于手动定向抓取。
+16. **修复认证边界 bug**：CAS 会话有效但 comsys 失效时登录页 302 被当异常。`_do_login` 需容忍 3xx（视为已认证或跟随重定向），列入 Phase 0。
+17. **公开源归档范围（v1）**：门户做「正文 + 附件 + 内联图片」；公开源只存**正文 HTML/文本**，不下载图片/附件（后续再议）。
+18. **目录与访问统计**：目录 `data/archive/<source_key>/<external_id>/`（门户 external_id = 原始 `notice_id`，公开源用文章路径 slug）；`assets.kind ∈ {content, attachment}`（内联图片归 `attachment`）；`last_access_at` 仅在访问 `GET /api/notices/{id}`、`/content`、`/content.zip`、`/files` 时更新（批量列表访问不算）；`evict_to_limit()` 在归档任务完成后触发并**节流**（≥60s 一次）。
+19. **并发与限额默认值**：`archive_workers=2`、每轮入队上限 `archive_enqueue_limit_per_poll=50`、`archive_max_per_notice=50`、`archive_max_file_mb=50`；单个下载失败最多重试 2 次（5s/20s 退避）后跳过，不阻塞后续。
 
 ## 方案（设计）
 
@@ -63,16 +73,17 @@
   - `archive(detail)`、`download(att, dest)`、`evict_to_limit()`（按 `last_access_at` 升序删到上限内）。
 - **engine（编排）**：`poll_once` 去重后只**入队**（不 await 下载）；`Archiver` 协议与 `Publisher` 同款解耦；`archive_enable=False` 时不启用。
   - **回填标记**：区分「正常轮询」与「回填」（首轮持久化标记 / 手动请求标记）。回填只入库 + 按窗口归档，默认不推送；`backfill_push=True` 时才推送。
-- **storage**：新增文件表 `assets(notice_id, kind, filename, local_path, size, sha1, first_download_at, last_access_at)`；读取通知/文件时更新 `last_access_at`；**不存正文全文**。
+- **storage**：新增文件表 `assets(notice_id, kind, filename, local_path, size, sha1, first_download_at, last_access_at)`，`kind ∈ {content, attachment}`（内联图片归 `attachment`）；仅在访问通知详情/正文/附件接口时更新 `last_access_at`；**不存正文全文**。
 - **transport**：
   - `GET /api/notices/{id}/content`（HTML，原始链接）
   - `GET /api/notices/{id}/content.zip`（HTML + 图片）
   - `GET /api/notices/{id}/files`（清单/单文件下载，防路径穿越）
   - `POST /api/notices/{id}/archive`（手动强制归档）
-  - `POST /api/check` 支持参数（source/type/页数/since）用于手动抓取历史
+  - `POST /api/check` 支持参数（`source`/`type`/`from_page`/`to_page`/`searchValue`）用于手动抓取历史；**不支持日期过滤**（见决策 15）
 - **配置**（遵循现有 `MNE_` 环境变量映射）：
   - `portal_page_limit`（默认 3）
-  - `archive_enable`、`archive_dir`（默认 `data/archive`）、`archive_workers`、`archive_max_file_mb`、`archive_max_per_notice`
+  - `archive_enable`、`archive_dir`（默认 `data/archive`）
+  - `archive_workers`（默认 2）、`archive_max_file_mb`（默认 50）、`archive_max_per_notice`（默认 50）、`archive_enqueue_limit_per_poll`（默认 50）
   - `archive_window_days`（`MNE_ARCHIVE_WINDOW_DAYS`，默认 90）
   - `archive_floor_date`（`MNE_ARCHIVE_FLOOR_DATE`，默认 `2026-08-31`）
   - `archive_total_limit_gb`（`MNE_ARCHIVE_TOTAL_LIMIT_GB`，默认 64）
@@ -107,11 +118,13 @@ data/archive/<source_key>/<notice_id>/
 - 单元：翻页解析 `page`；`fetch_detail` 解析 `notice_annext`；`ArchiveStore` 用 mock HTTP + 离线 fixture 验证落盘、文件名安全化、HTML 响应判失败；`evict_to_limit` 按 `last_access_at` 淘汰。
 - 集成：`notice_id=358513` → 下载 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`（带 Cookie 200 + `content-disposition`）。
 - 集成：自动窗口（cutoff）下旧通知不入队；手动 `POST /api/notices/{id}/archive` 可强制归档。
+- 集成：手动抓取用 `from_page`/`to_page` 翻历史页；`searchValue=推免` 定向取相关通知（实测可用）。
 - 集成：首轮回填与手动抓取**默认不触发 webhook**；`MNE_BACKFILL_PUSH=true` 时才推送。
 - REST：`/content`、`/content.zip`、`/files` 正常返回；访问后 `last_access_at` 更新。
 
 ## 任务拆分
 
+- [ ] 修复认证边界 bug（CAS 有效但 comsys 失效时登录页 302 被当异常）
 - [ ] 统一 URL 拼接基准（移除硬编码 `base_url`）
 - [ ] `Notice.external_id` + 全量 type + 门户翻页
 - [ ] `fetch_detail`（`getNotice` → HTML + 附件/图片）并合并 `enrich_contents`
@@ -120,6 +133,6 @@ data/archive/<source_key>/<notice_id>/
 - [ ] engine 入队编排 + `Archiver` 协议
 - [ ] 回填标记（首轮持久化 / 手动请求）+ 推送抑制（`backfill_push`）
 - [ ] storage `assets` 表 + `last_access_at` 维护
-- [ ] REST：content / content.zip / files / 手动 archive / 参数化 check（防路径穿越）
+- [ ] REST：content / content.zip / files / 手动 archive / 手动 check（`from_page`/`to_page`/`searchValue`；防路径穿越）
 - [ ] 配置项 + `.env.example` / `config.example.toml`
 - [ ] 测试与文档（changelog、architecture、规范编号说明）
