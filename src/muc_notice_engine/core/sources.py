@@ -1,7 +1,8 @@
-"""MUC 通知来源清单（14 个）。
+"""MUC 通知来源清单（10 个公开源 + 11 个门户类型）。
 
 移植自 astrbot_plugin_MUC_Notices/sources.py。
 新增/修改来源时，只需改这里；抓取逻辑在 fetcher.py 中保持通用。
+链接拼接统一以当前页面 URL 为基准（urljoin），不再配置 base_url。
 """
 
 from __future__ import annotations
@@ -15,6 +16,20 @@ from .parsers import (
     parse_title_attr,
 )
 
+
+def _portal_source(key: str, name: str, type_id: int, category: str) -> SourceConfig:
+    return {
+        "key": key,
+        "name": name,
+        "url": "https://my.muc.edu.cn/comsys-portal-notice-web/getNoticeByPage",
+        "selector": f"api:type={type_id}",
+        "parser": parse_selector_generic,
+        "category": category,
+        "requires_auth": True,
+        "api_params": {"currentPage": 1, "pageSize": 20, "type": type_id},
+    }
+
+
 SOURCES: list[SourceConfig] = [
     # ========== 主站通知公告 ==========
     {
@@ -24,7 +39,6 @@ SOURCES: list[SourceConfig] = [
         "selector": ".list_box2 li a[title]",
         "parser": parse_title_attr,
         "category": "muc",
-        "base_url": "https://www.muc.edu.cn/",
     },
     # ========== 研究生院 - 招生工作 ==========
     {
@@ -34,7 +48,6 @@ SOURCES: list[SourceConfig] = [
         "selector": 'a[href*="info/1178/"]',
         "parser": parse_selector_generic,
         "category": "graduate",
-        "base_url": "https://grs.muc.edu.cn/",
     },
     # ========== 研究生院 - 培养工作 ==========
     {
@@ -44,7 +57,6 @@ SOURCES: list[SourceConfig] = [
         "selector": "a[href*='info/']",
         "parser": parse_text_content,
         "category": "graduate",
-        "base_url": "https://grs.muc.edu.cn/",
     },
     # ========== 研究生院 - 学位工作 ==========
     {
@@ -54,7 +66,6 @@ SOURCES: list[SourceConfig] = [
         "selector": "a[href*='info/']",
         "parser": parse_text_content,
         "category": "graduate",
-        "base_url": "https://grs.muc.edu.cn/",
     },
     # ========== 研究生院 - 学籍学生工作 ==========
     {
@@ -64,7 +75,6 @@ SOURCES: list[SourceConfig] = [
         "selector": "a[href*='info/']",
         "parser": parse_text_content,
         "category": "graduate",
-        "base_url": "https://grs.muc.edu.cn/",
     },
     # ========== 研究生招生网 ==========
     {
@@ -74,7 +84,6 @@ SOURCES: list[SourceConfig] = [
         "selector": "a[href*='info/']",
         "parser": parse_text_content,
         "category": "graduate",
-        "base_url": "https://grs.muc.edu.cn/",
     },
     # ========== 人事处 - 通知公告 ==========
     {
@@ -84,7 +93,6 @@ SOURCES: list[SourceConfig] = [
         "selector": 'a[href*="info/"][title]',
         "parser": parse_title_attr,
         "category": "rsc",
-        "base_url": "https://rsc.muc.edu.cn/",
     },
     # ========== 财务处 - 通知公告 ==========
     {
@@ -94,7 +102,6 @@ SOURCES: list[SourceConfig] = [
         "selector": 'a[href*="info/"]',
         "parser": parse_selector_generic,
         "category": "cwc",
-        "base_url": "https://cwc.muc.edu.cn/",
     },
     # ========== 新闻网 - 综合新闻 ==========
     {
@@ -104,7 +111,6 @@ SOURCES: list[SourceConfig] = [
         "selector": "a.eclip, a.a, a.ablink",
         "parser": parse_title_attr,
         "category": "news",
-        "base_url": "https://news.muc.edu.cn/",
     },
     # ========== 新闻网 - 教学科研 ==========
     {
@@ -114,54 +120,26 @@ SOURCES: list[SourceConfig] = [
         "selector": "h4 a",
         "parser": parse_title_attr,
         "category": "news",
-        "base_url": "https://news.muc.edu.cn/",
     },
-    # ========== 信息门户 - 需登录（API）==========
-    {
-        "key": "my_bgtz",
-        "name": "信息门户 - 办公通知",
-        "url": "https://my.muc.edu.cn/comsys-portal-notice-web/getNoticeByPage",
-        "selector": 'api:type=5',
-        "parser": parse_selector_generic,
-        "category": "portal",
-        "base_url": "https://my.muc.edu.cn/",
-        "requires_auth": True,
-        "api_params": {"currentPage": 1, "pageSize": 20, "type": 5},
-    },
-    {
-        "key": "my_jxtz",
-        "name": "信息门户 - 教学通知",
-        "url": "https://my.muc.edu.cn/comsys-portal-notice-web/getNoticeByPage",
-        "selector": 'api:type=6',
-        "parser": parse_selector_generic,
-        "category": "portal",
-        "base_url": "https://my.muc.edu.cn/",
-        "requires_auth": True,
-        "api_params": {"currentPage": 1, "pageSize": 20, "type": 6},
-    },
-    {
-        "key": "my_kytz",
-        "name": "信息门户 - 科研通知",
-        "url": "https://my.muc.edu.cn/comsys-portal-notice-web/getNoticeByPage",
-        "selector": 'api:type=8',
-        "parser": parse_selector_generic,
-        "category": "portal",
-        "base_url": "https://my.muc.edu.cn/",
-        "requires_auth": True,
-        "api_params": {"currentPage": 1, "pageSize": 20, "type": 8},
-    },
-    {
-        "key": "my_xgtz",
-        "name": "信息门户 - 学工通知",
-        "url": "https://my.muc.edu.cn/comsys-portal-notice-web/getNoticeByPage",
-        "selector": 'api:type=32',
-        "parser": parse_selector_generic,
-        "category": "portal",
-        "base_url": "https://my.muc.edu.cn/",
-        "requires_auth": True,
-        "api_params": {"currentPage": 1, "pageSize": 20, "type": 32},
-    },
+    # ========== 信息门户 - 需登录（API，全量有效 type）==========
+    _portal_source("my_xhw", "信息门户 - 新华网", 1, "news"),
+    _portal_source("my_mzyw", "信息门户 - 民委要闻", 3, "news"),
+    _portal_source("my_sztt", "信息门户 - 时政头条", 4, "news"),
+    _portal_source("my_bgtz", "信息门户 - 办公通知", 5, "portal"),
+    _portal_source("my_jxtz", "信息门户 - 教学通知", 6, "portal"),
+    _portal_source("my_kytz", "信息门户 - 科研通知", 8, "portal"),
+    _portal_source("my_xyxw", "信息门户 - 校园新闻", 9, "news"),
+    _portal_source("my_jyxx", "信息门户 - 就业信息", 10, "career"),
+    _portal_source("my_gsgg", "信息门户 - 公示公告", 11, "notice"),
+    _portal_source("my_xgtz", "信息门户 - 学工通知", 32, "portal"),
+    _portal_source("my_hdbd", "信息门户 - 活动报道", 36, "news"),
 ]
+
+PORTAL_TYPES: dict[int, str] = {
+    source["api_params"]["type"]: source["key"]
+    for source in SOURCES
+    if source.get("requires_auth", False) and "api_params" in source
+}
 
 SOURCES_BY_KEY: dict[str, SourceConfig] = {
     source["key"]: source for source in SOURCES if "key" in source

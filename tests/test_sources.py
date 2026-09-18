@@ -1,8 +1,13 @@
-from muc_notice_engine.core.sources import SOURCES, resolve_source
+from muc_notice_engine.core.sources import PORTAL_TYPES, SOURCES, resolve_source
 
 
 def test_source_count():
-    assert len(SOURCES) == 14
+    assert len(SOURCES) == 21
+    assert len(PORTAL_TYPES) == 11
+
+
+def test_portal_types_cover_all_valid():
+    assert set(PORTAL_TYPES) == {1, 3, 4, 5, 6, 8, 9, 10, 11, 32, 36}
 
 
 def test_source_keys_unique():

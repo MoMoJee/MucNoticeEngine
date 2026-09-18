@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS notices (
     date         TEXT NOT NULL DEFAULT '',
     pub_date     TEXT NOT NULL DEFAULT '',
     published_at TEXT NOT NULL,
+    external_id  TEXT NOT NULL DEFAULT '',
     summary      TEXT NOT NULL DEFAULT '',
     content      TEXT NOT NULL DEFAULT '',
     first_seen_at TEXT NOT NULL,
@@ -39,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category);
 
 _COLUMNS = (
     "id, title, link, source, source_key, category, date, pub_date, "
-    "published_at, summary, content"
+    "published_at, external_id, summary, content"
 )
 
 
@@ -66,7 +67,7 @@ class NoticeStore:
             for n in notices:
                 cur = self._conn.execute(
                     f"INSERT OR IGNORE INTO notices ({_COLUMNS}, first_seen_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         n.id,
                         n.title,
@@ -77,6 +78,7 @@ class NoticeStore:
                         n.date,
                         n.pub_date,
                         n.published_at.isoformat(),
+                        n.external_id,
                         n.summary,
                         n.content,
                         now,
@@ -196,6 +198,7 @@ def _row_to_notice(row: sqlite3.Row) -> Notice:
         date=row["date"],
         pub_date=row["pub_date"],
         published_at=datetime.fromisoformat(row["published_at"]),
+        external_id=row["external_id"],
         summary=row["summary"],
         content=row["content"],
     )

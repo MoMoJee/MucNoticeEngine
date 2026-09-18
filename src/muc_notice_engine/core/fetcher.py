@@ -13,15 +13,16 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from hashlib import sha1
-from urllib.parse import urljoin
+from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
 
 from ..config import Settings
-from .auth import MucAuthService
+from .auth import AJAX_HEADERS, MucAuthService
 from .models import Notice, SourceConfig
-from .sources import SOURCES
+from .sources import PORTAL_TYPES, SOURCES, SOURCES_BY_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,8 @@ DATE_PATTERN_FULL = re.compile(
 DATE_PATTERN_SHORT = re.compile(
     r"(?P<month>\d{1,2})\s*(?:月|[-/.])\s*(?P<day>\d{1,2})\s*日?"
 )
+# 门户翻页时的礼貌间隔，避免连续请求过快。
+PORTAL_PAGE_DELAY = 0.2
 
 # 文章正文里常见的容器（民大各站基本是织梦/CMS 那套）
 ARTICLE_SELECTORS = (
@@ -53,6 +56,13 @@ ARTICLE_SELECTORS = (
     ".news_content",
     "article",
 )
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 class SessionInvalidError(Exception):
@@ -274,6 +284,7 @@ class MucRssService:
                             "%a, %d %b %Y %H:%M:%S +0800"
                         ),
                         published_at=published_at,
+                        external_id=self._make_external_id(full_url),
                     )
                 )
                 seen_links.add(full_url)
@@ -290,80 +301,159 @@ class MucRssService:
             return []
 
         api_params = source.get("api_params", {})
-        ajax_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Origin": "https://my.muc.edu.cn",
-            "Referer": "https://my.muc.edu.cn/page/11",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        }
-
+        type_id = _as_int(api_params.get("type"))
+        page_size = _as_int(api_params.get("pageSize")) or 20
         try:
-            response = await client.post(
-                source["url"], data=api_params, headers=ajax_headers
+            return await self._fetch_portal_pages(
+                client,
+                source,
+                type_id,
+                from_page=1,
+                to_page=max(1, self.settings.portal_page_limit),
+                page_size=page_size,
             )
-            response.raise_for_status()
-            body_head = response.text[:80]
-            if "error_comsys_session_invalid" in body_head:
-                raise SessionInvalidError(source["key"])
-            data = response.json()
-            tables = data.get("datas", {}).get("tables", [])
-            if not tables:
-                return []
-
-            notices: list[Notice] = []
-            for item in tables:
-                title = item.get("notice_title", "").strip()
-                if not title:
-                    continue
-                notice_id = str(item.get("notice_id", ""))
-                notice_type = source.get("api_params", {}).get("type", 5)
-                link = (
-                    "https://my.muc.edu.cn/page/11#/print?"
-                    f"type={notice_type}&notice_id={notice_id}&show_type=1"
-                )
-                published_at = datetime(2000, 1, 1, tzinfo=CHINA_TZ)
-                time_val = item.get("notice_release_time")
-                if time_val:
-                    published_at = self._parse_api_time(time_val, published_at)
-
-                raw_content = item.get("notice_content", "")
-                summary_text = ""
-                content_text = ""
-                if raw_content:
-                    try:
-                        soup = BeautifulSoup(raw_content, "html.parser")
-                        plain = soup.get_text(separator=" ", strip=True)
-                        plain = re.sub(r"\s+", " ", plain).strip()
-                        summary_text = plain[:80] + ("..." if len(plain) > 80 else "")
-                        content_text = plain[:2000]
-                    except Exception:  # noqa: BLE001
-                        pass
-
-                notices.append(
-                    Notice(
-                        id=self._make_notice_id(source["key"], notice_id),
-                        title=title,
-                        link=link,
-                        source=source["name"],
-                        source_key=source["key"],
-                        category=source["category"],
-                        date=published_at.strftime("%Y-%m-%d %H:%M"),
-                        pub_date=published_at.strftime(
-                            "%a, %d %b %Y %H:%M:%S +0800"
-                        ),
-                        published_at=published_at,
-                        summary=summary_text,
-                        content=content_text,
-                    )
-                )
-            return notices
         except SessionInvalidError:
             raise
         except Exception as exc:  # noqa: BLE001
             logger.info("[RSS] API 来源 %s 失败: %s", source["key"], exc)
             return []
+
+    async def fetch_portal_type(
+        self,
+        type_id: int,
+        *,
+        from_page: int = 1,
+        to_page: int = 1,
+        search_value: str | None = None,
+    ) -> list[Notice]:
+        """手动抓取门户指定 type 的页数区间（历史回填用，不受 portal_page_limit 限制）。"""
+        source = SOURCES_BY_KEY.get(PORTAL_TYPES.get(type_id, ""))
+        if source is None:
+            logger.info("[RSS] 未知门户 type=%s", type_id)
+            return []
+        if self._auth_service is None:
+            logger.warning("[RSS] 手动抓取门户失败：未配置认证服务")
+            return []
+
+        page_size = _as_int(source.get("api_params", {}).get("pageSize")) or 20
+
+        async def _attempt() -> list[Notice]:
+            client = await self._auth_service.get_authenticated_client()
+            if client is None:
+                return []
+            return await self._fetch_portal_pages(
+                client,
+                source,
+                type_id,
+                from_page=from_page,
+                to_page=to_page,
+                page_size=page_size,
+                search_value=search_value,
+            )
+
+        try:
+            return await _attempt()
+        except SessionInvalidError:
+            logger.info("[RSS] 手动抓取门户会话失效，重新登录后重试")
+            self._auth_service.invalidate()
+            try:
+                return await _attempt()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[RSS] 手动抓取门户重试仍失败: %s", exc)
+                return []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[RSS] 手动抓取门户失败: %s", exc)
+            return []
+
+    async def _fetch_portal_pages(
+        self,
+        client: httpx.AsyncClient,
+        source: SourceConfig,
+        type_id: int,
+        *,
+        from_page: int,
+        to_page: int,
+        page_size: int,
+        search_value: str | None = None,
+    ) -> list[Notice]:
+        notices: list[Notice] = []
+        page = max(1, from_page)
+        last_page = max(page, to_page)
+        while page <= last_page:
+            if page > max(1, from_page):
+                await asyncio.sleep(PORTAL_PAGE_DELAY)
+            data: dict[str, Any] = {
+                "currentPage": page,
+                "pageSize": page_size,
+                "type": type_id,
+            }
+            if search_value:
+                data["searchValue"] = search_value
+            response = await client.post(
+                source["url"], data=data, headers=AJAX_HEADERS
+            )
+            response.raise_for_status()
+            if "error_comsys_session_invalid" in response.text[:200]:
+                raise SessionInvalidError(source["key"])
+            payload = response.json()
+            datas = payload.get("datas") or {}
+            tables = datas.get("tables") or []
+            if not tables:
+                break
+            for item in tables:
+                parsed = self._parse_portal_item(source, item, type_id)
+                if parsed is not None:
+                    notices.append(parsed)
+
+            total_pages = _as_int((datas.get("page") or {}).get("totalCounts"))
+            if total_pages and page >= total_pages:
+                break
+            page += 1
+        return notices
+
+    def _parse_portal_item(
+        self, source: SourceConfig, item: dict, type_id: int
+    ) -> Notice | None:
+        title = str(item.get("notice_title", "")).strip()
+        if not title:
+            return None
+        notice_id = str(item.get("notice_id", ""))
+        link = (
+            "https://my.muc.edu.cn/page/11#/print?"
+            f"type={type_id}&notice_id={notice_id}&show_type=1"
+        )
+        published_at = datetime(2000, 1, 1, tzinfo=CHINA_TZ)
+        time_val = item.get("notice_release_time")
+        if time_val:
+            published_at = self._parse_api_time(time_val, published_at)
+
+        raw_content = item.get("notice_content", "")
+        summary_text = ""
+        content_text = ""
+        if raw_content:
+            try:
+                soup = BeautifulSoup(raw_content, "html.parser")
+                plain = soup.get_text(separator=" ", strip=True)
+                plain = re.sub(r"\s+", " ", plain).strip()
+                summary_text = plain[:80] + ("..." if len(plain) > 80 else "")
+                content_text = plain[:2000]
+            except Exception:  # noqa: BLE001
+                pass
+
+        return Notice(
+            id=self._make_notice_id(source["key"], notice_id),
+            title=title,
+            link=link,
+            source=source["name"],
+            source_key=source["key"],
+            category=source["category"],
+            date=published_at.strftime("%Y-%m-%d %H:%M"),
+            pub_date=published_at.strftime("%a, %d %b %Y %H:%M:%S +0800"),
+            published_at=published_at,
+            external_id=notice_id,
+            summary=summary_text,
+            content=content_text,
+        )
 
     def _parse_api_time(self, time_val, default: datetime) -> datetime:
         try:
@@ -471,6 +561,14 @@ class MucRssService:
     def _make_notice_id(self, source_key: str, link: str) -> str:
         digest = sha1(f"{source_key}|{link}".encode()).hexdigest()
         return f"{source_key}:{digest}"
+
+    def _make_external_id(self, link: str) -> str:
+        """公开源的文章标识：取 URL 路径 slug；过短则退回链接哈希。"""
+        path = urlparse(link).path.strip("/")
+        slug = re.sub(r"[^0-9A-Za-z._-]+", "-", path).strip("-.")
+        if slug:
+            return slug[:120].rstrip("-.")
+        return sha1(link.encode()).hexdigest()[:16]
 
     def _request_headers(
         self, source: SourceConfig, request_url: str | None = None

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from muc_notice_engine.config import Settings
 from muc_notice_engine.core.engine import NoticeEngine
+from muc_notice_engine.core.sources import SOURCES
 from muc_notice_engine.core.storage import NoticeStore
 from muc_notice_engine.transport.api import create_app
 from muc_notice_engine.transport.publishers import SubscriberStore
@@ -36,10 +37,10 @@ def test_health_is_public(tmp_path):
     assert resp.json()["status"] == "ok"
 
 
-def test_sources_endpoint_lists_14(tmp_path):
+def test_sources_endpoint_lists_all(tmp_path):
     resp = _client(tmp_path).get("/api/sources")
     assert resp.status_code == 200
-    assert len(resp.json()) == 14
+    assert len(resp.json()) == len(SOURCES)
 
 
 def test_token_required_when_configured(tmp_path):

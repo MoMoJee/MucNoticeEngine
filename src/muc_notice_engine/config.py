@@ -23,6 +23,7 @@ _ENV_MAP: dict[str, str] = {
     "MNE_REQUEST_TIMEOUT_SECONDS": "request_timeout_seconds",
     "MNE_MAX_CONCURRENT_REQUESTS": "max_concurrent_requests",
     "MNE_RSS_MAX_ITEMS": "rss_max_items",
+    "MNE_PORTAL_PAGE_LIMIT": "portal_page_limit",
     "MNE_API_HOST": "api_host",
     "MNE_API_PORT": "api_port",
     "MNE_API_TOKEN": "api_token",
@@ -34,6 +35,7 @@ _INT_FIELDS = {
     "request_timeout_seconds",
     "max_concurrent_requests",
     "rss_max_items",
+    "portal_page_limit",
     "push_max_age_days",
     "notice_retention_days",
     "api_port",
@@ -55,6 +57,8 @@ class Settings:
     request_timeout_seconds: int = 20
     max_concurrent_requests: int = 5
     rss_max_items: int = 150
+    # 门户每个 type 每轮抓取的最大页数（每页 20 条）。
+    portal_page_limit: int = 3
     rss_title: str = "中央民族大学多站点通知聚合"
 
     # --- 轮询 / 保留 ---
