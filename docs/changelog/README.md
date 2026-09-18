@@ -14,6 +14,10 @@
 | [0001](0001-bootstrap-engine.md) | 初始化独立通知引擎与 REST 服务 | feat |
 | [0002](0002-dotenv-config.md) | 支持从 .env 读取配置 | feat |
 | [0003](0003-portal-type-enumeration.md) | 枚举信息门户通知 type 并归类 | docs |
+| [0004](0004-portal-pagination-attachments.md) | 门户翻页、补齐 type、正文与附件落盘 | feature |
+| [0005](0005-search-fields-and-window-semantics.md) | q 搜索字段扩展、归档时间窗语义与 API 文档体系 | feat |
+| [0006](0006-retention-first-seen.md) | 保留期改为按入库时间且默认关闭 | fix |
+| [0007](0007-rss-utf8-charset.md) | RSS 响应补充 charset=utf-8 | fix |
 
 ## 模板
 

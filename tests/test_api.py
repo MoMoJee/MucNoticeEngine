@@ -86,6 +86,22 @@ def test_index_links_to_docs(tmp_path):
     assert "docs/guides/rest-api.md" in resp.text
 
 
+def test_rss_endpoint_declares_utf8_charset(tmp_path):
+    settings = Settings(data_dir=tmp_path, db_path=tmp_path / "t.db")
+    settings.rss_file_path.write_bytes(
+        (
+            "<?xml version='1.0' encoding='utf-8'?>\n"
+            '<rss version="2.0"><channel><title>中央民族大学</title></channel></rss>'
+        ).encode()
+    )
+
+    resp = _client(tmp_path).get("/api/rss")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/rss+xml; charset=utf-8"
+    assert "中央民族大学" in resp.text
+
+
 def test_health_is_public(tmp_path):
     resp = _client(tmp_path).get("/health")
     assert resp.status_code == 200

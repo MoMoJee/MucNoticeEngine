@@ -332,7 +332,7 @@ def create_app(
         path = settings.rss_file_path
         if not path.is_file():
             raise HTTPException(status_code=404, detail="rss not generated yet")
-        return FileResponse(path, media_type="application/rss+xml")
+        return FileResponse(path, media_type="application/rss+xml; charset=utf-8")
 
     # ---------------- Webhook 订阅管理 ----------------
 
