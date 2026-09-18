@@ -1,6 +1,6 @@
 # 0005 查询搜索字段、时间窗语义与 API 文档体系
 
-- Status: in-progress（开发者已确认实施）
+- Status: done（2026-09-19 交付，见 [changelog/0005](../changelog/0005-search-fields-and-window-semantics.md)）
 - Owner: MoMoJee
 - Created: 2026-09-19
 - Related: [0004-portal-pagination-attachments.md](0004-portal-pagination-attachments.md)、`core/storage.py`、`core/engine.py`、`transport/api.py`、`README.md`
@@ -145,13 +145,13 @@ cutoff = max(archive_floor_date, now - archive_window_days)
 
 ## 任务拆分
 
-- [ ] `storage.query`：`q` 扩展到 title/summary/content 并转义 `\` `%` `_`
-- [ ] `GET /` 引导页（指向 `/docs`）+ `api.py` 的 `q` 描述文案
-- [ ] 单元测试：三字段命中、转义、过滤/排序回归、根路由
-- [ ] `test_engine.test_archive_cutoff_prefers_later`（含 2030 场景）
-- [ ] 新增 `docs/guides/rest-api.md`（接口 + 回填 + 语义）
-- [ ] README 更新（接口表、21 来源、`.env`、链接新文档）
-- [ ] 防过期机制：AGENTS.md、conventions/docs.md、index.md、changelog 模板
-- [ ] `architecture.md` 时间窗/回填说明与文档链接
-- [ ] changelog 0005 + 计划/README 状态更新
-- [ ] 推送 GitHub；更新 10.60.43.8 并验证
+- [x] `storage.query`：`q` 扩展到 title/summary/content 并转义 `\` `%` `_`
+- [x] `GET /` 引导页（指向 `/docs`）+ `api.py` 的 `q` 描述文案
+- [x] 单元测试：三字段命中、转义、过滤/排序回归、根路由
+- [x] `test_engine.test_archive_cutoff_prefers_later`（含 2030 场景）
+- [x] 新增 `docs/guides/rest-api.md`（接口 + 回填 + 语义）
+- [x] README 更新（接口表、21 来源、`.env`、链接新文档）
+- [x] 防过期机制：AGENTS.md、conventions/docs.md、index.md、changelog 模板
+- [x] `architecture.md` 时间窗/回填说明与文档链接
+- [x] changelog 0005 + 计划/README 状态更新
+- [x] 推送 GitHub；更新 10.60.43.8 并验证
