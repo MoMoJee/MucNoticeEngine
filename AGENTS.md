@@ -13,7 +13,7 @@
 uv sync --extra dev                                  # 安装（Python >=3.11）
 uv run muc-notice-engine run                          # 启动服务（REST + 轮询 + webhook）
 uv run muc-notice-engine poll --source muc_tzgg       # 立即抓取一轮
-uv run muc-notice-engine sources                      # 列出 14 个来源
+uv run muc-notice-engine sources                      # 列出 21 个来源
 uv run muc-notice-engine rss                          # 生成 RSS 文件
 uv run ruff check . && uv run pytest                  # 提交前：先 lint 再测试
 uv run pytest tests/test_storage.py::test_upsert_is_deduplicating   # 跑单个测试
@@ -30,22 +30,29 @@ uv run pytest tests/test_storage.py::test_upsert_is_deduplicating   # 跑单个�
 
 ## 改哪里
 
-| 需求 | 文件 |
-| --- | --- |
-| 新增/修改来源 | `core/sources.py`（解析函数放 `core/parsers.py`） |
-| 抓取/日期解析 | `core/fetcher.py` |
-| 去重/查询/存储字段 | `core/storage.py` |
-| 轮询/过滤/事件 | `core/engine.py` |
-| REST 接口 | `transport/api.py` |
-| webhook 负载/签名 | `transport/publishers.py` |
-| 配置项 | `config.py` + `config.example.toml` |
+| 需求 | 文件 | 必须同步的文档 |
+| --- | --- | --- |
+| 新增/修改来源 | `core/sources.py`（解析函数放 `core/parsers.py`） | `docs/reference/portal-notice-types.md`（门户 type 变化时） |
+| 抓取/日期解析 | `core/fetcher.py` | — |
+| 去重/查询/存储字段 | `core/storage.py` | `docs/guides/rest-api.md`（查询语义） |
+| 搜索/归档/回填语义 | `core/engine.py` / `core/archive.py` | `docs/guides/rest-api.md` + `docs/architecture.md` |
+| REST 接口/参数 | `transport/api.py` | `docs/guides/rest-api.md` + `README.md` 接口表 |
+| webhook 负载/签名 | `transport/publishers.py` | `README.md` |
+| 配置项 | `config.py` + `config.example.toml` + `.env.example` | `docs/guides/rest-api.md`（影响使用时） |
+
+> 完整同步矩阵见 [docs/conventions/docs.md](docs/conventions/docs.md#代码变更--文档同步矩阵)。
 
 ## 工作流（必须遵守）
 
-1. 功能开发前在 `docs/plans/NNNN-kebab-topic.md` 建计划（模板见 `docs/plans/README.md`）。
-2. 实现并在 `docs/changelog/` 写同编号条目（模板见 `docs/changelog/README.md`）。
+1. 功能开发前在 `docs/plans/NNNN-kebab-topic.md` 建计划（模板见 `docs/plans/README.md`），
+   「影响面」必须列明要改的指导文档。
+2. 实现并在 `docs/changelog/` 写同编号条目（模板见 `docs/changelog/README.md`），
+   `Changes` 必须有一行「文档：」，没有改动也要写「无」。
 3. 提交信息格式与参考样例见 `docs/conventions/git.md`（以首次提交为基准）。
-4. 模块边界或数据流变化时同步 `docs/architecture.md`；新增文档登记到 `docs/index.md`。
+4. 文档同步（按 [conventions/docs.md 同步矩阵](docs/conventions/docs.md#代码变更--文档同步矩阵)）：
+   - 接口/参数/使用语义变化 → `docs/guides/rest-api.md` + `README.md` 接口表；
+   - 模块边界/数据流变化 → `docs/architecture.md`；
+   - 新增文档 → 登记到 `docs/index.md`。
 
 ### 提交与推送权限
 

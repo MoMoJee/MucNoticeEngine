@@ -43,7 +43,8 @@ class MyArchiver:
 3. 结果规范化为 `Notice`（`id=sha1(source_key|link)` 去重；`external_id` 记录门户
    `notice_id` 或公开源 URL slug），`storage.upsert_notices()` 用 `INSERT OR IGNORE` 判定新条目。
 4. 新条目：
-   - 满足归档时间窗（`published_at >= max(archive_floor_date, now - archive_window_days)`）
+   - 满足归档时间窗（`published_at >= cutoff`，`cutoff = max(archive_floor_date, now - archive_window_days)`
+     即二者取**较晚者**，2030 年只归档近 90 天）
      的交给 `Archiver.enqueue()`，后台 `ArchiveQueue` worker 调 `fetch_detail()` 抓正文/附件，
      `ArchiveStore` 落盘并写 `assets` 表；超总量按 `last_access_at` 升序淘汰。
    - 非回填（或 `backfill_push=true`）时经 `push_max_age_days` 过滤后交给所有 `Publisher`。
@@ -54,6 +55,7 @@ class MyArchiver:
 
 REST 不直接参与推送：查询走 `storage`，手动触发走 `engine.poll_once()` /
 `engine.manual_fetch_portal()`，正文/附件读取走已落盘的 `data/archive/`。
+接口参数、查询/归档/回填语义与历史回填步骤见 [guides/rest-api.md](guides/rest-api.md)。
 
 ## 扩展点
 

@@ -32,7 +32,8 @@
 
 - core/<module>：
 - transport/<module>：
-- 配置/文档：
+- 配置：
+- 文档（README / docs/guides/…，无则写「无」）：
 
 ## Verification
 

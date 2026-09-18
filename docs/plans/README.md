@@ -42,6 +42,7 @@
 - transport：
 - 配置：
 - 数据/schema：
+- 文档（按 [同步矩阵](../conventions/docs.md#代码变更--文档同步矩阵) 列出）：
 
 ## 风险与备选
 

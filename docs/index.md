@@ -16,6 +16,7 @@
 | --- | --- | --- |
 | [index.md](index.md) | 文档入口、目录结构、阅读顺序 | 新增/删除文档时 |
 | [architecture.md](architecture.md) | 模块边界、数据流、扩展点 | 模块边界或数据流变化时 |
+| [guides/rest-api.md](guides/rest-api.md) | REST 接口参考、查询/归档/回填语义、历史回填步骤 | 接口/参数/使用语义变化时 |
 | [conventions/docs.md](conventions/docs.md) | 文档命名、计划/变更日志写作规范、防过期规则 | 规范本身变化时 |
 | [conventions/git.md](conventions/git.md) | 提交流程、commit message 规范（参照首次提交） | 流程变化时 |
 | [reference/portal-notice-types.md](reference/portal-notice-types.md) | 门户通知 type 枚举与归类（含 CSV） | 门户分类变化时 |
@@ -58,9 +59,9 @@ tests/                                  # pytest
 | 改正文/附件落盘、淘汰、后台队列 | `core/archive.py` |
 | 改去重、查询、存储字段 | `core/storage.py`（改 schema 需同步 changelog 的迁移说明） |
 | 改轮询或新增事件消费者 | `core/engine.py`（实现 `Publisher` / `Archiver` 协议） |
-| 加 REST 接口 | `transport/api.py` |
-| 改 webhook 负载/签名 | `transport/publishers.py` |
-| 改配置项 | `config.py` + `config.example.toml` + `_conf` 文档同步 |
+| 加/改 REST 接口或参数 | `transport/api.py` + 同步 [guides/rest-api.md](guides/rest-api.md) 与 README 接口表 |
+| 改 webhook 负载/签名 | `transport/publishers.py` + 同步 README |
+| 改配置项 | `config.py` + `config.example.toml` + `.env.example` |
 
 ## 保持文档不过期（硬性）
 

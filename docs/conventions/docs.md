@@ -5,6 +5,8 @@
 | 目录 | 只放什么 | 不放什么 |
 | --- | --- | --- |
 | `docs/`（根） | 长期稳定的说明：索引、架构 | 计划、变更日志 |
+| `docs/guides/` | **面向使用者**的操作指南（如 `rest-api.md`：接口 + 语义 + 回填） | 某次开发的细节、计划 |
+| `docs/reference/` | 客观事实/采样结论（如门户 type 枚举） | 操作步骤 |
 | `docs/conventions/` | 规范本身 | 具体某次开发的细节 |
 | `docs/plans/` | **实现前**的计划 | 已完成的复盘（移到 changelog） |
 | `docs/changelog/` | **交付后**的变更说明 | 未来计划 |
@@ -38,13 +40,31 @@
 
 - 位置：`docs/changelog/NNNN-kebab-topic.md`，模板见 [changelog/README.md](../changelog/README.md)。
 - 必须包含：`Plan` 链接、`Type`、`Summary`、`Changes`（按模块）、`Verification`、`Breaking changes`、`Follow-ups`。
+- `Changes` 必须有一条「文档：」，列明同步了哪些指导文档；没有改动也要写「文档：无」。
 - 每次交付（一个可提交的变更集）对应一条；同一次提交若有多个维度，可写多条 `Changes` 但只建一个文件。
 - `Verification` 必须写实际跑过的命令与结果，不能写「应该没问题」。
+
+## 代码变更 → 文档同步矩阵
+
+改代码前先看这张表；**没有对应行也要在 changelog 的「文档：」行写「无」**。
+
+| 代码变更 | 必须同步 |
+| --- | --- |
+| REST 路径 / 参数 / 响应结构 | `docs/guides/rest-api.md` + `README.md` 接口表 |
+| 查询 / 搜索 / 分页 / 排序语义 | `docs/guides/rest-api.md` |
+| 归档 / 淘汰 / 回填 / 时间窗语义 | `docs/guides/rest-api.md` + `docs/architecture.md` |
+| 新增配置项或默认值变化 | `config.example.toml` + `.env.example` + `docs/guides/rest-api.md`（影响使用时） |
+| 新增/删除来源、门户 type 变化 | `docs/reference/portal-notice-types.md`（含 CSV） |
+| 模块边界 / 数据流 / 扩展点 | `docs/architecture.md` |
+| schema 变化（需人工清库） | changelog 的 `Breaking changes` |
+| 新增/删除文档 | `docs/index.md` 文档地图 |
 
 ## 防过期检查清单（提交前自问）
 
 - [ ] 新增/删除文档是否更新了 `docs/index.md`？
+- [ ] 按上方「同步矩阵」检查了本次改动涉及的指导文档？
+- [ ] `README.md` 的接口表/特性数字是否仍然正确？
 - [ ] 改动了 `core`/`transport` 边界，是否更新了 `architecture.md`？
-- [ ] 新增配置项，是否同步了 `config.example.toml`（以及本文档无需重复配置说明）？
+- [ ] 新增配置项，是否同步了 `config.example.toml` / `.env.example`？
 - [ ] changelog 的 `Verification` 是否是真实执行过的命令？
 - [ ] 文档里的命令能否直接复制运行？
