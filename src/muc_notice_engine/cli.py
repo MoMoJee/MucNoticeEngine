@@ -12,6 +12,7 @@ import sys
 from contextlib import suppress
 
 from .config import load_settings
+from .core.archive import ArchiveQueue, ArchiveStore
 from .core.auth import MucAuthService
 from .core.engine import NoticeEngine
 from .core.fetcher import MucRssService
@@ -69,13 +70,21 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     store, auth, fetcher, subscribers = _build(settings)
     publisher = WebhookPublisher(subscribers, settings)
-    engine = NoticeEngine(settings, fetcher, store, [publisher])
+    archive_queue: ArchiveQueue | None = None
+    archive_store: ArchiveStore | None = None
+    if settings.archive_enable:
+        archive_store = ArchiveStore(settings, store, auth)
+        archive_queue = ArchiveQueue(settings, store, fetcher, archive_store)
+    engine = NoticeEngine(
+        settings, fetcher, store, [publisher], archiver=archive_queue
+    )
     app = create_app(
         engine=engine,
         store=store,
         settings=settings,
         fetcher=fetcher,
         subscribers=subscribers,
+        archive_store=archive_store,
     )
 
     async def _serve() -> None:
@@ -86,6 +95,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             log_level="info",
         )
         server = uvicorn.Server(config)
+        if archive_queue is not None:
+            await archive_queue.start()
         poll_task = asyncio.create_task(engine.run_forever())
         try:
             await server.serve()
@@ -94,6 +105,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             poll_task.cancel()
             with suppress(asyncio.CancelledError):
                 await poll_task
+            if archive_queue is not None:
+                await archive_queue.stop()
             await auth.close()
             store.close()
             subscribers.close()
