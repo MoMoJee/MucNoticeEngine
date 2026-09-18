@@ -57,16 +57,42 @@
 - **发现 bug**：`grs_yjszs` 的 `base_url` 写成站点根 `https://grs.muc.edu.cn/`，但列表页在子目录 `/yjsyzsw/`，导致所有链接拼成 `.../info/...` 返回 **404**。修正做法：改用 `page_url` 作为 `urljoin` 基准，或把 `base_url` 设为 `https://grs.muc.edu.cn/yjsyzsw/`。
 - 结论：**正文下载可行**，但依赖先修 URL bug。
 
-### 4. 附件解析：可行，但以“图片”为主，“文件”很少
+### 4. 附件解析：**可行且是重点**（更正早前结论）
 
-- 门户：`notice_content` 里**主要内联 `<img>`**（UEditor 上传图）。实测图片**无需登录即可下载**（HTTP 200 `image/png`），但 URL 形如 `http://my.muc.edu.cn:80/...`，需**跟随 301 重定向并归一化**。
-- 门户中带文件扩展名的 `<a>` 很少，且抽查发现部分为作者本地路径 `file:///D:/...`（**无效，必须过滤**，仅保留 `http/https` + 文件扩展名）。
-- 公开源：抽样文章**未见文件附件**，主要是内联图片（新闻页最多 9 张）；推免“合集”正文是**各学院官网链接**（跨站），可作为相关链接保存。
-- 结论：**附件解析可行**，解析范围 = 正文内 `<img>` + 文件扩展名 `<a href>`（http/https）；实际以图片为主，真实文档附件占比低。
+早前只看 `notice_content` 的 `<a href>`，因此误判“附件很少”。实际附件在**独立字段**里：
+
+- **详情接口**：`POST /comsys-portal-notice-web/getNotice`，表单 `notice_id=<id>`，返回 `datas.notice_info`。
+- 附件列表在 `notice_info.notice_annext[]`，每项包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `notice_annex_id` | 文件 UUID（下载时作 `id`） |
+| `notice_annex_name` | 文件名（含中文，如 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`） |
+| `notice_annex_path` | 服务器路径 `/data/notice_upload_file/<uuid>/<name>` |
+| `suffix` | 扩展名（xlsx/pdf/docx/jpg…） |
+| `type` | 可见范围标记 |
+
+- **下载接口**：`GET /comsys-portal-notice-web/download?id=<annex_id>&notice_id=<notice_id>`。
+- **需要登录**：无 Cookie 请求返回 `200 text/html`（登录页，约 11KB），带 Cookie 才返回真实文件（`application/octet-stream` + `content-disposition: attachment;filename="..."`）。因此**必须用已认证会话下载，并校验 `content-disposition`/大小**，不能只看状态码。
+
+**附件普遍程度（抽样 5 类 × 10 条，2026-09-18）**：
+
+| type | 有附件的通知 |
+| --- | --- |
+| 5 办公通知 | 1/10 |
+| 6 教学通知 | **8/10** |
+| 8 科研通知 | 1/10 |
+| 11 公示公告 | **6/10** |
+| 32 学工通知 | 6/10 |
+| 合计 | **22/50 = 44%** |
+
+- 结论：**附件解析可行且必要**。正文 `notice_content` 里写“见附件”但本身不含链接，所以必须**额外调用 `getNotice` 拿附件列表**，再按 `notice_annext` 下载。
+- 公开源：抽样文章未见文件型附件，主要是内联图片（新闻页最多 9 张）；推免“合集”正文是**各学院官网链接**（跨站），可作为相关链接保存。
 
 ### 5. 落盘与鉴权
 
-- 门户内联图片公开可下载；门户正文 HTML 来自 API（需登录）。
+- 门户正文 HTML 与附件均需登录会话；下载要带 Cookie 并校验 `content-disposition`，失败（返回 HTML）时跳过。
+- 附件可能同名、含中文与特殊字符，落盘需安全化文件名。
 - 需处理：重定向、`Referer`、超时、单文件大小上限、并发限速、失败跳过。
 
 ## 方案（设计，暂不实现）
@@ -74,8 +100,10 @@
 - **配置新增**：`portal_page_limit`（每类翻页上限，默认 3）、`archive_enable`（默认 true）、`archive_dir`（默认 `data/archive`）、`archive_download_files`、`archive_max_file_mb`、`archive_max_per_notice`。
 - **fetcher**：
   - 门户来源按 `currentPage` 循环到 `pageLimit` 或 `totalCounts`。
+  - 门户通知：对**新通知**调用 `getNotice` 取完整 `notice_content` 与 `notice_annext`（附件列表）。
   - 修正 `grs_yjszs` 的 URL 拼接。
-  - 新增 `archive_notice(notice)`：抓正文 HTML → 落盘 `content.html`、提取 `content.txt`、解析并下载附件/图片 → 写 `meta.json`。
+  - 新增 `archive_notice(notice)`：落盘正文 HTML/文本、按 `notice_annext` 逐个 `download`（带认证）保存附件、写 `meta.json`；校验 `content-disposition`，HTML 响应视为失败跳过。
+  - 注意：详情接口 + 下载是**额外请求**，需限速并只对新通知执行。
 - **storage**：`notices` 增加 `archive_dir`（或 `has_archive`）；附件清单可存 JSON 字段或新表 `attachments(notice_id, kind, url, local_path, filename, size, sha1)`。**不存正文全文**。
 - **sources**：新增 `type=11` 公示公告（带关键词过滤）、可选 `type=10` 就业信息；新增 source 级 `title_include` / `title_exclude`（复用 `parsers.py` 中已有的关键词函数）。
 - **transport**：`GET /api/notices/{id}/content`、`GET /api/notices/{id}/files`；REST `q` 可扩展为标题+正文搜索（可后置）。
@@ -103,8 +131,9 @@ data/archive/<source_key>/<notice_id>/
 
 ## 验证方式
 
-- 单元：翻页解析 `page` 元数据；附件链接过滤（`file://` 丢弃）；归档落盘用离线 HTML fixture。
-- 集成：对 `type=6/11` 抓多页，确认 9/9、9/10 名额分配通知入库且归档成功。
+- 单元：翻页解析 `page` 元数据；解析 `notice_annext`；归档落盘用离线 fixture。
+- 集成：对 `notice_id=358513` 走 `getNotice` → 下载 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`（实测带 Cookie 可 200 + `content-disposition`，27391 字节）。
+- 集成：对 `type=6/11` 抓多页，确认 9/9、9/10 名额分配通知入库且附件归档成功。
 - REST：`GET /api/notices/{id}/files` 能列出并取到本地文件。
 
 ## 任务拆分

@@ -30,7 +30,7 @@
 
 - **翻页可行**：响应 `datas.page` 含 `total`（总条数）、`totalCounts`（总页数）；`currentPage` 有效，超界返回空。
 - **正文**：门户 `notice_content` 为完整 HTML；公开源正文容器 `.v_news_content`/`#vsb_content` 命中率高。
-- **附件**：门户以**内联图片**为主（可公开下载，需跟随 301、归一化 `:80`），真实文档附件少，且有 `file://` 无效链接需过滤；公开源抽样未见文件附件。
+- **附件**：门户**相当多通知带文件附件**（抽样 44%；type=6 为 8/10，type=11 为 6/10）。附件不在 `notice_content`，而在详情接口 `POST getNotice` 的 `notice_info.notice_annext[]`；下载走 `GET /comsys-portal-notice-web/download?id=<annex_id>&notice_id=<id>`，**需登录**。公开源抽样未见文件附件，主要是内联图片。
 - 实现计划见 [plans/0004](../plans/0004-portal-pagination-attachments.md)。
 
 完整样本见同目录 [portal-notice-types.csv](portal-notice-types.csv)。
