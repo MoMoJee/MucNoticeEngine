@@ -13,15 +13,22 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from hashlib import sha1
+from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
 
 from ..config import Settings
-from .auth import AJAX_HEADERS, MucAuthService
-from .models import Notice, SourceConfig
+from .auth import (
+    AJAX_HEADERS,
+    NOTICE_DETAIL_URL,
+    NOTICE_DOWNLOAD_URL,
+    PORTAL_BASE_URL,
+    MucAuthService,
+)
+from .models import Attachment, Notice, NoticeDetail, SourceConfig
 from .sources import PORTAL_TYPES, SOURCES, SOURCES_BY_KEY
 
 logger = logging.getLogger(__name__)
@@ -455,6 +462,128 @@ class MucRssService:
             content=content_text,
         )
 
+    # ---------------- 正文 / 附件（详情） ----------------
+
+    async def fetch_detail(self, notice: Notice) -> NoticeDetail | None:
+        """抓取一条通知的完整正文与附件（门户走 getNotice，公开源抓文章页）。"""
+        source = SOURCES_BY_KEY.get(notice.source_key)
+        if source is not None and source.get("requires_auth", False):
+            return await self._fetch_portal_detail(notice)
+        return await self._fetch_public_detail(notice)
+
+    async def _fetch_portal_detail(self, notice: Notice) -> NoticeDetail | None:
+        if self._auth_service is None or not notice.external_id:
+            return None
+
+        async def _attempt() -> NoticeDetail | None:
+            client = await self._auth_service.get_authenticated_client()
+            if client is None:
+                return None
+            resp = await client.post(
+                NOTICE_DETAIL_URL,
+                data={"notice_id": notice.external_id},
+                headers=AJAX_HEADERS,
+            )
+            if "error_comsys_session_invalid" in resp.text[:200]:
+                raise SessionInvalidError(notice.source_key)
+            resp.raise_for_status()
+            payload = resp.json()
+            info = (payload.get("datas") or {}).get("notice_info") or {}
+            content_html = str(info.get("notice_content") or "")
+            return NoticeDetail(
+                notice=notice,
+                content_html=content_html,
+                attachments=self._parse_portal_attachments(
+                    notice, info, content_html
+                ),
+                plain_text=_html_to_text(content_html),
+            )
+
+        try:
+            return await _attempt()
+        except SessionInvalidError:
+            logger.info("[RSS] 获取正文时会话失效 %s，重登后重试", notice.id)
+            self._auth_service.invalidate()
+            try:
+                return await _attempt()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[RSS] 重试获取正文仍失败 %s: %s", notice.id, exc)
+                return None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[RSS] 获取门户正文失败 %s: %s", notice.id, exc)
+            return None
+
+    def _parse_portal_attachments(
+        self, notice: Notice, info: dict, content_html: str
+    ) -> list[Attachment]:
+        attachments: list[Attachment] = []
+        for idx, raw in enumerate(info.get("notice_annext") or []):
+            if not isinstance(raw, dict):
+                continue
+            annex_id = str(raw.get("notice_annex_id") or "").strip()
+            name = str(raw.get("notice_annex_name") or "").strip() or f"attachment-{idx}"
+            attachments.append(
+                Attachment(
+                    annex_id=annex_id,
+                    name=name,
+                    url=(
+                        f"{NOTICE_DOWNLOAD_URL}?id={quote(annex_id)}"
+                        f"&notice_id={quote(notice.external_id)}"
+                    ),
+                    suffix=str(raw.get("suffix") or "").strip(),
+                    kind="file",
+                )
+            )
+
+        seen: set[str] = set()
+        soup = BeautifulSoup(content_html, "html.parser")
+        for idx, img in enumerate(soup.find_all("img")):
+            src = str(img.get("src") or "").strip()
+            if not src:
+                continue
+            url = urljoin(PORTAL_BASE_URL, src)
+            if not url.startswith(("http://", "https://")) or url in seen:
+                continue
+            seen.add(url)
+            name = Path(urlparse(url).path).name or f"image-{idx}.png"
+            attachments.append(
+                Attachment(annex_id="", name=name, url=url, suffix="", kind="image")
+            )
+        return attachments
+
+    async def _fetch_public_detail(self, notice: Notice) -> NoticeDetail | None:
+        if not (notice.link or "").startswith("http"):
+            return None
+        timeout = min(self.settings.request_timeout_seconds, 15)
+        try:
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=timeout, headers=DEFAULT_HEADERS
+            ) as client:
+                async with self._semaphore:
+                    resp = await client.get(notice.link)
+                resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[RSS] 抓正文失败 %s: %s", notice.link, exc)
+            return None
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        node = None
+        for sel in ARTICLE_SELECTORS:
+            node = soup.select_one(sel)
+            if node:
+                break
+        node = node or soup.body or soup
+        for bad in node.select("script, style, nav, header, footer"):
+            bad.decompose()
+        content_html = "".join(str(child) for child in node.children).strip()
+        plain = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+        return NoticeDetail(
+            notice=notice,
+            content_html=content_html,
+            attachments=[],
+            plain_text=plain,
+        )
+
     def _parse_api_time(self, time_val, default: datetime) -> datetime:
         try:
             if isinstance(time_val, (int, float)) or (
@@ -577,41 +706,8 @@ class MucRssService:
         headers["Referer"] = request_url or source["url"]
         return headers
 
-    async def enrich_contents(self, notices: list[Notice], limit: int = 15) -> None:
-        """为 content 为空的通知补抓原文正文，原地写回 content（失败静默跳过）。"""
-        targets = [
-            n
-            for n in notices
-            if not (n.content or "").strip() and (n.link or "").startswith("http")
-        ][:limit]
-        if not targets:
-            return
-
-        timeout = min(self.settings.request_timeout_seconds, 15)
-        async with httpx.AsyncClient(
-            follow_redirects=True, timeout=timeout, headers=DEFAULT_HEADERS
-        ) as client:
-
-            async def _one(n: Notice) -> None:
-                async with self._semaphore:
-                    try:
-                        r = await client.get(n.link)
-                        r.raise_for_status()
-                        soup = BeautifulSoup(r.text, "html.parser")
-                        node = None
-                        for sel in ARTICLE_SELECTORS:
-                            node = soup.select_one(sel)
-                            if node:
-                                break
-                        node = node or soup.body or soup
-                        for bad in node.select("script, style, nav, header, footer"):
-                            bad.decompose()
-                        text = re.sub(
-                            r"\s+", " ", node.get_text(" ", strip=True)
-                        ).strip()
-                        if len(text) >= 20:
-                            n.content = text[:2000]
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug("[RSS] 抓正文失败 %s: %s", n.link, exc)
-
-            await asyncio.gather(*(_one(n) for n in targets))
+def _html_to_text(html: str) -> str:
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    return re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()

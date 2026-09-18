@@ -30,7 +30,10 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
-NOTICE_API_URL = "https://my.muc.edu.cn/comsys-portal-notice-web/getNoticeByPage"
+PORTAL_BASE_URL = "https://my.muc.edu.cn"
+NOTICE_API_URL = f"{PORTAL_BASE_URL}/comsys-portal-notice-web/getNoticeByPage"
+NOTICE_DETAIL_URL = f"{PORTAL_BASE_URL}/comsys-portal-notice-web/getNotice"
+NOTICE_DOWNLOAD_URL = f"{PORTAL_BASE_URL}/comsys-portal-notice-web/download"
 AJAX_HEADERS = {
     "User-Agent": USER_AGENT,
     "Origin": "https://my.muc.edu.cn",
