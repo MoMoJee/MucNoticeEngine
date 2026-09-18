@@ -33,6 +33,24 @@
    tail -n 50 ~/MucNoticeEngine/logs/engine.log
    ```
 
+## Git 更新（GitHub 不通时用 bundle 增量）
+
+生产机到 GitHub 偶发失败（`Failure when receiving data from the peer`，实测 2026-09-19）。
+此时在本地打包从服务器当前提交到 `master` 的增量，走 SCP：
+
+```bash
+# 本地（<server-head> 为服务器 git log 里的提交）
+git bundle create /tmp/muc_update.bundle <server-head>..master
+scp /tmp/muc_update.bundle momojee@49.232.15.53:~/SCP_TEMP/
+
+# 服务器
+cd ~/MucNoticeEngine
+git pull ~/SCP_TEMP/muc_update.bundle master
+~/.local/bin/uv sync --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+git checkout -- uv.lock
+./stop.sh && ./start.sh
+```
+
 ## 常用命令
 
 ```bash

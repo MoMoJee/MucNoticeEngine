@@ -35,6 +35,10 @@
   -> 共 5 条（远端 26 条，扫描 9 条，结果被截断）；结果中无「名单」类条目
 - `uv run muc-notice-engine search --site lxy --keyword 推免 --scope title --since 2026-09-01 --until 2026-09-30 --limit 3`
   -> 共 3 条，标题检索与日期范围生效
+- 生产机（49.232.15.53，bundle 更新到 `31751af` 后重启）：
+  - `/health` -> `source_count=32`；启动轮询后 `notice_count` 1371 → 1465（11 个新来源入库 94 条）
+  - `/api/stats` -> 11 个新来源均有数据（lxy_* / xg_*）
+  - `/api/search/sites` -> `count=34`；`/api/search?site=xingong&q=推免&match=all` -> 正常返回
 
 ## Breaking changes
 
@@ -42,6 +46,6 @@
 
 ## Follow-ups
 
-- 生产机（49.232.15.53）按 `docs/guides/deployment.md` 更新并验证。
 - 后续可把远程检索并入 `/api/notices?q=`（如 `remote=1`），`/api/search` 保持兼容。
 - `/api/*` 尚未配置 `MNE_API_TOKEN`（SERVER_INDEX 记为中风险）。
+- 生产机到 GitHub 偶发不通，本次用本地 bundle 增量更新，流程见 `docs/guides/deployment.md`。
