@@ -65,7 +65,7 @@
 
 > 职责拆分：发现附件（门户特有）留 fetcher；下载/落盘/淘汰（与来源无关）放 `core/archive.py`；引擎只入队编排。
 
-- **模型**（`core/models.py`）：`Notice` 加 `external_id`；`Attachment(notice_id, annex_id, name, suffix, kind)`（`kind ∈ {file,image}`）；`NoticeDetail(notice, content_html, attachments)`。
+- **模型**（`core/models.py`）：`Notice` 加 `external_id`；`Attachment(notice_id, annex_id, name, suffix, kind)`（`Attachment.kind` 表示来源类型 `∈ {file,image}`）；`NoticeDetail(notice, content_html, attachments)`。注意与落盘表 `assets.kind ∈ {content,attachment}` 区分：前者是「从网页发现的类型」，后者是「存到磁盘的类别」。
 - **fetcher（发现，不碰文件系统）**：全量 type + 翻页；`fetch_detail(notice) -> NoticeDetail`；统一 urljoin。
 - **新增 `core/archive.py`（取存 + 队列）**：
   - `ArchiveStore(settings, auth_service)`：目录布局、文件名安全化、单文件大小上限、sha1、原子写、`meta.json`。
@@ -91,7 +91,7 @@
 - **目录结构**：
 
 ```
-data/archive/<source_key>/<notice_id>/
+data/archive/<source_key>/<external_id>/
 ├── content.html      # 原始 HTML（保留原始链接）
 ├── content.txt       # 纯文本
 ├── meta.json         # 元数据 + 附件清单
