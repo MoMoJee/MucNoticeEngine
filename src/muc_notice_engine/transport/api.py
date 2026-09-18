@@ -78,6 +78,25 @@ def create_app(
 
     # ---------------- 基础 ----------------
 
+    @app.get("/")
+    async def index() -> HTMLResponse:
+        """首页引导：接口文档在 /docs（Swagger UI）。"""
+        return HTMLResponse(
+            "<!doctype html><meta charset='utf-8'>"
+            "<title>MucNoticeEngine</title>"
+            "<h1>MucNoticeEngine</h1>"
+            "<p>中央民族大学多站点通知聚合 / 存储 / 去重引擎</p>"
+            "<ul>"
+            "<li><a href='/docs'>API 文档（Swagger UI）</a></li>"
+            "<li><a href='/redoc'>API 文档（ReDoc）</a></li>"
+            "<li><a href='/openapi.json'>OpenAPI schema</a></li>"
+            "<li><a href='/health'>健康检查</a></li>"
+            "<li><a href='/api/notices'>通知列表</a></li>"
+            "<li><a href='/api/sources'>来源列表</a></li>"
+            "</ul>"
+            "<p>使用语义与历史回填见仓库 <code>docs/guides/rest-api.md</code>。</p>"
+        )
+
     @app.get("/health")
     async def health() -> dict:
         payload = {
@@ -118,7 +137,7 @@ def create_app(
         source: str | None = Query(None, description="逗号分隔的 source_key"),
         category: str | None = None,
         since: datetime | None = None,
-        q: str | None = Query(None, description="标题关键词"),
+        q: str | None = Query(None, description="关键词，匹配标题/摘要/正文预览"),
         limit: int = Query(50, ge=1, le=500),
         offset: int = Query(0, ge=0),
     ) -> dict:

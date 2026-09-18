@@ -164,9 +164,9 @@ class NoticeEngine:
         if selected:
             await self.archiver.enqueue_many(selected)
 
-    def archive_cutoff(self) -> datetime:
-        """自动归档时间窗：max(floor_date, now - window_days)。"""
-        now = datetime.now(CHINA_TZ)
+    def archive_cutoff(self, now: datetime | None = None) -> datetime:
+        """自动归档时间窗：max(floor_date, now - window_days)，即二者取较晚者。"""
+        now = now or datetime.now(CHINA_TZ)
         window = now - timedelta(days=max(0, self.settings.archive_window_days))
         floor = self._parse_floor_date()
         return max(floor, window) if floor is not None else window

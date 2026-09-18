@@ -40,6 +40,37 @@ async def test_query_filters_and_orders(tmp_path):
     assert matched[0].id == "src:hash2"
 
 
+async def test_query_matches_summary_and_content(tmp_path):
+    store = NoticeStore(tmp_path / "t.db")
+    notice = _notice(1)
+    notice.summary = "智慧校园建设进展"
+    notice.content = "网络强国 主题学习"
+    await store.upsert_notices([notice])
+
+    assert [n.id for n in await store.query(q="智慧校园建设")] == ["src:hash1"]
+    assert [n.id for n in await store.query(q="网络强国")] == ["src:hash1"]
+    assert [n.id for n in await store.query(q="通知 1")] == ["src:hash1"]
+    assert await store.query(q="确定不存在的词") == []
+
+
+async def test_query_escapes_like_wildcards(tmp_path):
+    store = NoticeStore(tmp_path / "t.db")
+    literal = _notice(1)
+    literal.title = "补贴 100% 到账"
+    other = _notice(2)
+    other.title = "补贴 100元 到账"
+    underscore = _notice(3)
+    underscore.title = "a_b 文件"
+    plain = _notice(4)
+    plain.title = "axb 文件"
+    await store.upsert_notices([literal, other, underscore, plain])
+
+    assert [n.id for n in await store.query(q="100%")] == ["src:hash1"]
+    assert [n.id for n in await store.query(q="a_b")] == ["src:hash3"]
+    # 反斜杠按字面处理：库里没有 "a\_b" 这个串，所以不该命中
+    assert await store.query(q="a\\_b") == []
+
+
 async def test_mark_pushed_and_stats(tmp_path):
     store = NoticeStore(tmp_path / "t.db")
     await store.upsert_notices([_notice(1), _notice(2)])

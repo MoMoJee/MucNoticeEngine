@@ -79,6 +79,13 @@ def _client(tmp_path, token: str = "", store=None, archive_store=None,
     return TestClient(app)
 
 
+def test_index_links_to_docs(tmp_path):
+    resp = _client(tmp_path).get("/")
+    assert resp.status_code == 200
+    assert "/docs" in resp.text
+    assert "docs/guides/rest-api.md" in resp.text
+
+
 def test_health_is_public(tmp_path):
     resp = _client(tmp_path).get("/health")
     assert resp.status_code == 200

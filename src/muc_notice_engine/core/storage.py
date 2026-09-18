@@ -157,8 +157,13 @@ class NoticeStore:
             clauses.append("published_at >= ?")
             params.append(since.isoformat())
         if q:
-            clauses.append("title LIKE ?")
-            params.append(f"%{q}%")
+            escaped = _escape_like(q)
+            pattern = f"%{escaped}%"
+            clauses.append(
+                "(title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' "
+                "OR content LIKE ? ESCAPE '\\')"
+            )
+            params.extend([pattern, pattern, pattern])
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.extend([max(1, min(limit, 500)), max(0, offset)])
@@ -345,6 +350,11 @@ class NoticeStore:
 
     def close(self) -> None:
         self._conn.close()
+
+
+def _escape_like(value: str) -> str:
+    """转义 LIKE 通配符，配合 ESCAPE '\\' 使用。"""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _row_to_notice(row: sqlite3.Row) -> Notice:

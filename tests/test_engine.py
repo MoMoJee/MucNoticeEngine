@@ -127,6 +127,25 @@ async def test_manual_fetch_is_backfill_without_rss(tmp_path):
     assert fetcher.rss_written == 0
 
 
+async def test_archive_cutoff_prefers_later(tmp_path):
+    engine, _, _ = _engine(
+        tmp_path,
+        [],
+        archive_window_days=90,
+        archive_floor_date="2026-08-31",
+    )
+    floor = datetime(2026, 8, 31, tzinfo=CHINA_TZ)
+
+    # 2030 场景：滚动窗口比固定 floor 晚 -> 取窗口，不拉 2026 起的历史
+    now_2030 = datetime(2030, 6, 1, tzinfo=CHINA_TZ)
+    assert engine.archive_cutoff(now=now_2030) == now_2030 - timedelta(days=90)
+    assert engine.archive_cutoff(now=now_2030) > floor
+
+    # 当前（2026-09）：floor 比窗口晚 -> 取 floor
+    now_2026 = datetime(2026, 9, 19, tzinfo=CHINA_TZ)
+    assert engine.archive_cutoff(now=now_2026) == floor
+
+
 async def test_archive_cutoff_uses_floor_date(tmp_path):
     engine, _, _ = _engine(
         tmp_path,
