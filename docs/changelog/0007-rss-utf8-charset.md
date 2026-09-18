@@ -26,6 +26,10 @@ Feeder 因解析 XML 声明不受影响。
   缺少 charset 的客户端猜测。
 - 修复后响应头由 `test_rss_endpoint_declares_utf8_charset` 覆盖，断言
   `application/rss+xml; charset=utf-8` 且中文正文可读。
+- 部署机（10.60.43.8）GitHub 不通，用增量 bundle 更新到 `b4f5c7e` 并
+  `stop.sh`/`start.sh` 重启；`curl -D - /api/rss` 实测响应头为
+  `application/rss+xml; charset=utf-8`，正文经 `iconv` UTF-8 校验通过，
+  标题显示正常。
 
 ## Breaking changes
 
