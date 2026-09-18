@@ -108,13 +108,21 @@ class MucAuthService:
     async def _do_login(self, client: httpx.AsyncClient) -> bool:
         try:
             login_url = f"{LOGIN_PAGE_URL}?service={httpx.URL(PORTAL_SERVICE)}"
-            resp = await client.get(
-                login_url,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                },
-            )
+            login_headers = {
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            resp = await client.get(login_url, headers=login_headers)
+
+            # CAS 会话仍有效时，登录页会 302 直接带 ticket 跳回门户。
+            if resp.is_redirect:
+                resp = await self._follow_redirects(client, resp)
+                if await self._is_portal_ready(client, resp):
+                    logger.info("[AUTH] CAS 会话仍有效，直接复用（免密登录）。")
+                    return True
+                logger.info("[AUTH] 登录页重定向但会话无效，按未登录流程继续。")
+                resp = await client.get(login_url, headers=login_headers)
+
             resp.raise_for_status()
 
             html = resp.text
@@ -155,21 +163,11 @@ class MucAuthService:
                 },
             )
 
-            ru = resp.headers.get("Location", "")
-            max_redirects = 10
-            while ru and max_redirects > 0:
-                if ru.startswith("/"):
-                    ru = f"{resp.url.scheme}://{resp.url.netloc}{ru}"
-                resp = await client.get(ru, follow_redirects=False)
-                ru = resp.headers.get("Location", "")
-                max_redirects -= 1
+            resp = await self._follow_redirects(client, resp)
 
-            if "my.muc.edu.cn" in str(resp.url) and resp.status_code == 200:
-                if await self._verify_login(client):
-                    logger.info("[AUTH] 登录成功！")
-                    return True
-                logger.warning("[AUTH] 落回门户页但会话校验未通过（登录实际失败）。")
-                return False
+            if await self._is_portal_ready(client, resp):
+                logger.info("[AUTH] 登录成功！")
+                return True
 
             logger.warning(
                 "[AUTH] 登录异常，最终 URL=%s，状态码=%s", resp.url, resp.status_code
@@ -179,6 +177,28 @@ class MucAuthService:
         except Exception as exc:  # noqa: BLE001
             logger.error("[AUTH] 登录异常：%s", exc)
             return False
+
+    async def _follow_redirects(
+        self, client: httpx.AsyncClient, resp: httpx.Response, *, limit: int = 10
+    ) -> httpx.Response:
+        """手动跟随 Location，最多 limit 跳（用于 CAS 票据链）。"""
+        location = resp.headers.get("Location", "")
+        while location and limit > 0:
+            if location.startswith("/"):
+                location = f"{resp.url.scheme}://{resp.url.netloc}{location}"
+            resp = await client.get(location, follow_redirects=False)
+            location = resp.headers.get("Location", "")
+            limit -= 1
+        return resp
+
+    async def _is_portal_ready(
+        self, client: httpx.AsyncClient, resp: httpx.Response
+    ) -> bool:
+        return (
+            "my.muc.edu.cn" in str(resp.url)
+            and resp.status_code == 200
+            and await self._verify_login(client)
+        )
 
     async def _sm2_encrypt(self, plaintext: str, public_key_b64: str) -> str:
         try:
@@ -204,11 +224,12 @@ class MucAuthService:
                 data={"currentPage": 1, "pageSize": 1, "type": 5},
                 headers=AJAX_HEADERS,
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("state") is not False:
-                    return True
-            return False
+            if resp.status_code != 200:
+                return False
+            if "error_comsys_session_invalid" in resp.text[:200]:
+                return False
+            data = resp.json()
+            return isinstance(data, dict) and "datas" in data and data.get("state") is not False
         except Exception:  # noqa: BLE001
             return False
 
