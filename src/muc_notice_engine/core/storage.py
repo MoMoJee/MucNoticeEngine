@@ -334,7 +334,10 @@ class NoticeStore:
     # ---------------- 维护 ----------------
 
     async def purge_older_than_days(self, days: int) -> int:
-        """删除 published_at 早于 N 天的记录，返回删除条数。days<=0 时不清理。"""
+        """删除入库时间（first_seen_at）早于 N 天的记录，返回删除条数。days<=0 时不清理。
+
+        按入库时间而非发布时间：手动回填的历史从入库时刻起算保留期。
+        """
         if days <= 0:
             return 0
         return await asyncio.to_thread(self._purge, days)
@@ -344,7 +347,7 @@ class NoticeStore:
         cutoff_iso = datetime.fromtimestamp(cutoff, tz=CHINA_TZ).isoformat()
         with self._lock, self._conn:
             cur = self._conn.execute(
-                "DELETE FROM notices WHERE published_at < ?", (cutoff_iso,)
+                "DELETE FROM notices WHERE first_seen_at < ?", (cutoff_iso,)
             )
             return cur.rowcount
 

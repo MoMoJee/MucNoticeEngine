@@ -1,5 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from muc_notice_engine import config as config_mod
+from muc_notice_engine.config import Settings
 from muc_notice_engine.core.fetcher import CHINA_TZ
 from muc_notice_engine.core.models import Notice
 from muc_notice_engine.core.storage import NoticeStore
@@ -69,6 +71,43 @@ async def test_query_escapes_like_wildcards(tmp_path):
     assert [n.id for n in await store.query(q="a_b")] == ["src:hash3"]
     # 反斜杠按字面处理：库里没有 "a\_b" 这个串，所以不该命中
     assert await store.query(q="a\\_b") == []
+
+
+async def test_purge_uses_first_seen_at(tmp_path):
+    store = NoticeStore(tmp_path / "t.db")
+    backfilled = _notice(1)  # published_at 是 2026-01-01（旧）
+    fresh = _notice(2)
+    await store.upsert_notices([backfilled, fresh])
+
+    # 入库时间都是现在：发布时间再旧也不清理（回填场景）
+    assert await store.purge_older_than_days(180) == 0
+    assert await store.get(backfilled.id) is not None
+
+    # 把入库时间改到 200 天前：应被清理
+    old_seen = (datetime.now(CHINA_TZ) - timedelta(days=200)).isoformat()
+    with store._lock, store._conn:
+        store._conn.execute(
+            "UPDATE notices SET first_seen_at = ? WHERE id = ?",
+            (old_seen, backfilled.id),
+        )
+    assert await store.purge_older_than_days(180) == 1
+    assert await store.get(backfilled.id) is None
+    assert await store.get(fresh.id) is not None
+
+    # 0 表示不清理
+    assert await store.purge_older_than_days(0) == 0
+
+
+def test_retention_default_disabled():
+    assert Settings().notice_retention_days == 0
+
+
+def test_retention_and_push_age_env_mapping(monkeypatch):
+    monkeypatch.setenv("MNE_NOTICE_RETENTION_DAYS", "365")
+    monkeypatch.setenv("MNE_PUSH_MAX_AGE_DAYS", "7")
+    settings = Settings.from_dict(config_mod._env_overrides())
+    assert settings.notice_retention_days == 365
+    assert settings.push_max_age_days == 7
 
 
 async def test_mark_pushed_and_stats(tmp_path):

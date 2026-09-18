@@ -24,6 +24,8 @@ _ENV_MAP: dict[str, str] = {
     "MNE_MAX_CONCURRENT_REQUESTS": "max_concurrent_requests",
     "MNE_RSS_MAX_ITEMS": "rss_max_items",
     "MNE_PORTAL_PAGE_LIMIT": "portal_page_limit",
+    "MNE_PUSH_MAX_AGE_DAYS": "push_max_age_days",
+    "MNE_NOTICE_RETENTION_DAYS": "notice_retention_days",
     "MNE_ARCHIVE_ENABLE": "archive_enable",
     "MNE_ARCHIVE_DIR": "archive_dir",
     "MNE_ARCHIVE_WORKERS": "archive_workers",
@@ -83,8 +85,9 @@ class Settings:
     poll_on_start: bool = True
     # 超过这个天数的「新」通知不推送（避免首次启动刷屏），但仍会入库。
     push_max_age_days: int = 30
-    # 数据库中超过这个天数的记录会被清理；0 表示不清理。
-    notice_retention_days: int = 180
+    # 数据库记录保留期：按 first_seen_at（入库时间）清理，回填的历史从入库时刻起算。
+    # 0（默认）表示不清理；归档文件的大小上限见 archive_total_limit_gb。
+    notice_retention_days: int = 0
 
     # --- 正文 / 附件归档 ---
     # 开关；关闭后新通知只入库，不抓正文不下载附件。

@@ -19,7 +19,9 @@ rss_title = "中央民族大学多站点通知聚合"
 
 # --- 推送 / 保留 ---
 push_max_age_days = 30
-notice_retention_days = 180
+# 数据库记录保留期：按入库时间（first_seen_at）清理；0（默认）不清理。
+# 归档文件的大小上限见 archive_total_limit_gb。
+notice_retention_days = 0
 
 # --- 正文 / 附件归档 ---
 archive_enable = true
