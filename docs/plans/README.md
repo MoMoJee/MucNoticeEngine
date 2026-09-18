@@ -12,6 +12,7 @@
 | 编号 | 标题 | 状态 |
 | --- | --- | --- |
 | [0001](0001-bootstrap-engine.md) | 从 AstrBot 插件剥离独立通知引擎 | done |
+| [0002](0002-dotenv-config.md) | 支持从 .env 读取配置 | done |
 
 ## 模板
 

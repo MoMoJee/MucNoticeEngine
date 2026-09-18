@@ -120,6 +120,21 @@ def _load_toml(path: Path) -> dict[str, Any]:
         return tomllib.load(fh)
 
 
+def _load_dotenv(path: Path) -> None:
+    """把 .env 里的键值读进 os.environ，但不覆盖已存在的真实环境变量。"""
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _env_overrides() -> dict[str, Any]:
     result: dict[str, Any] = {}
     for env_name, field_name in _ENV_MAP.items():
@@ -133,11 +148,18 @@ def load_settings(
     config_path: str | Path | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> Settings:
-    """合并 默认值 / config.toml / 环境变量 / 调用方 overrides。"""
-    merged: dict[str, Any] = {}
+    """合并 默认值 / config.toml / .env / 环境变量 / 调用方 overrides。"""
     if config_path is None:
         config_path = Path(DEFAULT_CONFIG_NAME)
-    merged.update(_load_toml(Path(config_path)))
+    config_path = Path(config_path)
+
+    # .env 优先级高于 config.toml、低于真实环境变量。
+    _load_dotenv(Path(".env"))
+    if config_path.parent != Path("."):
+        _load_dotenv(config_path.parent / ".env")
+
+    merged: dict[str, Any] = {}
+    merged.update(_load_toml(config_path))
     merged.update(_env_overrides())
     if overrides:
         merged.update(overrides)

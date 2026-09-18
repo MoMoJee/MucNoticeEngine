@@ -12,6 +12,7 @@
 | 编号 | 标题 | 类型 |
 | --- | --- | --- |
 | [0001](0001-bootstrap-engine.md) | 初始化独立通知引擎与 REST 服务 | feat |
+| [0002](0002-dotenv-config.md) | 支持从 .env 读取配置 | feat |
 
 ## 模板
 
