@@ -298,6 +298,7 @@ class ArchiveQueue:
         self._queue: asyncio.Queue[tuple[Notice, bool]] = asyncio.Queue()
         self._tasks: list[asyncio.Task] = []
         self._processed = 0
+        self._skipped = 0
         self._failed = 0
 
     @property
@@ -306,7 +307,12 @@ class ArchiveQueue:
 
     @property
     def stats(self) -> dict:
-        return {"pending": self.pending, "processed": self._processed, "failed": self._failed}
+        return {
+            "pending": self.pending,
+            "processed": self._processed,
+            "skipped": self._skipped,
+            "failed": self._failed,
+        }
 
     async def start(self) -> None:
         workers = max(1, self.settings.archive_workers)
@@ -341,7 +347,7 @@ class ArchiveQueue:
                 if archived:
                     self._processed += 1
                 else:
-                    self._failed += 1
+                    self._skipped += 1
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001
