@@ -36,6 +36,25 @@ CREATE TABLE IF NOT EXISTS notices (
 CREATE INDEX IF NOT EXISTS idx_notices_source    ON notices(source_key);
 CREATE INDEX IF NOT EXISTS idx_notices_published ON notices(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notices_category  ON notices(category);
+
+CREATE TABLE IF NOT EXISTS assets (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    notice_id         TEXT NOT NULL,
+    kind              TEXT NOT NULL,
+    filename          TEXT NOT NULL,
+    local_path        TEXT NOT NULL,
+    size              INTEGER NOT NULL DEFAULT 0,
+    sha1              TEXT NOT NULL DEFAULT '',
+    first_download_at TEXT NOT NULL,
+    last_access_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_assets_notice ON assets(notice_id);
+CREATE INDEX IF NOT EXISTS idx_assets_access ON assets(last_access_at);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 _COLUMNS = (
@@ -165,6 +184,147 @@ class NoticeStore:
         return await asyncio.to_thread(
             lambda: self._conn.execute("SELECT COUNT(*) FROM notices").fetchone()[0]
         )
+
+    # ---------------- 落盘文件表 ----------------
+
+    async def add_assets(self, notice_id: str, records: list[dict]) -> None:
+        if not records:
+            return
+        await asyncio.to_thread(self._add_assets, notice_id, records)
+
+    def _add_assets(self, notice_id: str, records: list[dict]) -> None:
+        now = datetime.now(CHINA_TZ).isoformat()
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO assets (notice_id, kind, filename, local_path, size, sha1, "
+                "first_download_at, last_access_at) VALUES (?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        notice_id,
+                        r.get("kind", ""),
+                        r.get("filename", ""),
+                        r.get("local_path", ""),
+                        int(r.get("size", 0)),
+                        r.get("sha1", ""),
+                        now,
+                        now,
+                    )
+                    for r in records
+                ],
+            )
+
+    async def clear_assets(self, notice_id: str) -> None:
+        await asyncio.to_thread(self._clear_assets, notice_id)
+
+    def _clear_assets(self, notice_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM assets WHERE notice_id = ?", (notice_id,))
+
+    async def replace_assets(self, notice_id: str, records: list[dict]) -> None:
+        """原子替换一条通知的落盘文件记录（先删后插）。"""
+        await asyncio.to_thread(self._replace_assets, notice_id, records)
+
+    def _replace_assets(self, notice_id: str, records: list[dict]) -> None:
+        now = datetime.now(CHINA_TZ).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM assets WHERE notice_id = ?", (notice_id,))
+            self._conn.executemany(
+                "INSERT INTO assets (notice_id, kind, filename, local_path, size, sha1, "
+                "first_download_at, last_access_at) VALUES (?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        notice_id,
+                        r.get("kind", ""),
+                        r.get("filename", ""),
+                        r.get("local_path", ""),
+                        int(r.get("size", 0)),
+                        r.get("sha1", ""),
+                        now,
+                        now,
+                    )
+                    for r in records
+                ],
+            )
+
+    async def get_assets(self, notice_id: str) -> list[dict]:
+        return await asyncio.to_thread(self._get_assets, notice_id)
+
+    def _get_assets(self, notice_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM assets WHERE notice_id = ? ORDER BY id", (notice_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    async def touch_assets(self, notice_id: str) -> None:
+        await asyncio.to_thread(self._touch_assets, notice_id)
+
+    def _touch_assets(self, notice_id: str) -> None:
+        now = datetime.now(CHINA_TZ).isoformat()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE assets SET last_access_at = ? WHERE notice_id = ?",
+                (now, notice_id),
+            )
+
+    async def total_asset_size(self) -> int:
+        return await asyncio.to_thread(
+            lambda: self._conn.execute(
+                "SELECT COALESCE(SUM(size), 0) FROM assets"
+            ).fetchone()[0]
+        )
+
+    async def list_assets_oldest(self, limit: int = 500) -> list[dict]:
+        return await asyncio.to_thread(self._list_assets_oldest, limit)
+
+    def _list_assets_oldest(self, limit: int) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM assets ORDER BY last_access_at ASC, id ASC LIMIT ?",
+            (max(1, limit),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    async def delete_asset(self, asset_id: int) -> None:
+        await asyncio.to_thread(self._delete_asset, asset_id)
+
+    def _delete_asset(self, asset_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+
+    async def fill_content_preview(self, notice_id: str, content: str) -> None:
+        """仅在 content 为空时写入预览文本（不覆盖列表接口已有内容）。"""
+        text = (content or "").strip()[:2000]
+        if not text:
+            return
+        await asyncio.to_thread(self._fill_content_preview, notice_id, text)
+
+    def _fill_content_preview(self, notice_id: str, text: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE notices SET content = ? WHERE id = ? AND content = ''",
+                (text, notice_id),
+            )
+
+    # ---------------- 键值状态（回填标记等）----------------
+
+    async def get_meta(self, key: str) -> str | None:
+        return await asyncio.to_thread(self._get_meta, key)
+
+    def _get_meta(self, key: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    async def set_meta(self, key: str, value: str) -> None:
+        await asyncio.to_thread(self._set_meta, key, value)
+
+    def _set_meta(self, key: str, value: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
 
     # ---------------- 维护 ----------------
 

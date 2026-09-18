@@ -13,11 +13,28 @@ poll_on_start = true
 request_timeout_seconds = 20
 max_concurrent_requests = 5
 rss_max_items = 150
+# 门户每个 type 每轮抓取的最大页数（每页 20 条）
+portal_page_limit = 3
 rss_title = "中央民族大学多站点通知聚合"
 
 # --- 推送 / 保留 ---
 push_max_age_days = 30
 notice_retention_days = 180
+
+# --- 正文 / 附件归档 ---
+archive_enable = true
+# archive_dir = "data/archive"   # 不填则跟随 data_dir
+archive_workers = 2
+archive_enqueue_limit_per_poll = 50
+archive_max_file_mb = 50
+archive_max_per_notice = 50
+# 自动归档时间窗：published_at >= max(floor_date, now - window_days)
+archive_window_days = 90
+archive_floor_date = "2026-08-31"
+# 归档目录总上限（GB），超限按最近访问时间升序淘汰
+archive_total_limit_gb = 64
+# 首轮回填 / 手动回填是否也推送 webhook
+backfill_push = false
 
 # --- 信息门户认证（可选；不填则只抓公开站点）---
 muc_username = ""

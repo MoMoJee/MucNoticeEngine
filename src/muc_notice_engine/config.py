@@ -24,6 +24,16 @@ _ENV_MAP: dict[str, str] = {
     "MNE_MAX_CONCURRENT_REQUESTS": "max_concurrent_requests",
     "MNE_RSS_MAX_ITEMS": "rss_max_items",
     "MNE_PORTAL_PAGE_LIMIT": "portal_page_limit",
+    "MNE_ARCHIVE_ENABLE": "archive_enable",
+    "MNE_ARCHIVE_DIR": "archive_dir",
+    "MNE_ARCHIVE_WORKERS": "archive_workers",
+    "MNE_ARCHIVE_MAX_FILE_MB": "archive_max_file_mb",
+    "MNE_ARCHIVE_MAX_PER_NOTICE": "archive_max_per_notice",
+    "MNE_ARCHIVE_ENQUEUE_LIMIT_PER_POLL": "archive_enqueue_limit_per_poll",
+    "MNE_ARCHIVE_WINDOW_DAYS": "archive_window_days",
+    "MNE_ARCHIVE_FLOOR_DATE": "archive_floor_date",
+    "MNE_ARCHIVE_TOTAL_LIMIT_GB": "archive_total_limit_gb",
+    "MNE_BACKFILL_PUSH": "backfill_push",
     "MNE_API_HOST": "api_host",
     "MNE_API_PORT": "api_port",
     "MNE_API_TOKEN": "api_token",
@@ -40,8 +50,14 @@ _INT_FIELDS = {
     "notice_retention_days",
     "api_port",
     "webhook_timeout_seconds",
+    "archive_workers",
+    "archive_max_file_mb",
+    "archive_max_per_notice",
+    "archive_enqueue_limit_per_poll",
+    "archive_window_days",
+    "archive_total_limit_gb",
 }
-_BOOL_FIELDS = {"poll_on_start"}
+_BOOL_FIELDS = {"poll_on_start", "archive_enable", "backfill_push"}
 
 
 @dataclass
@@ -70,6 +86,24 @@ class Settings:
     # 数据库中超过这个天数的记录会被清理；0 表示不清理。
     notice_retention_days: int = 180
 
+    # --- 正文 / 附件归档 ---
+    # 开关；关闭后新通知只入库，不抓正文不下载附件。
+    archive_enable: bool = True
+    archive_dir: Path = Path("data") / "archive"
+    # 后台下载 worker 数；单轮最多入队多少条新通知归档。
+    archive_workers: int = 2
+    archive_enqueue_limit_per_poll: int = 50
+    # 单文件、单通知附件数量上限。
+    archive_max_file_mb: int = 50
+    archive_max_per_notice: int = 50
+    # 自动归档时间窗：published_at >= max(floor_date, now - window_days)。
+    archive_window_days: int = 90
+    archive_floor_date: str = "2026-08-31"
+    # 归档目录总大小上限（GB），超限按 last_access_at 升序淘汰。
+    archive_total_limit_gb: int = 64
+    # 首轮回填/手动回填是否也触发 webhook 推送。
+    backfill_push: bool = False
+
     # --- 门户认证（可选）---
     muc_username: str = ""
     muc_password: str = ""
@@ -89,6 +123,10 @@ class Settings:
         self.db_path = Path(self.db_path)
         if self.db_path == Path("data") / "muc_notice.db":
             self.db_path = self.data_dir / "muc_notice.db"
+        # archive_dir 同理
+        self.archive_dir = Path(self.archive_dir)
+        if self.archive_dir == Path("data") / "archive":
+            self.archive_dir = self.data_dir / "archive"
 
     @property
     def rss_file_path(self) -> Path:
@@ -111,7 +149,7 @@ class Settings:
                     value = value.strip().lower() in ("1", "true", "yes", "on")
                 else:
                     value = bool(value)
-            elif key in {"data_dir", "db_path"}:
+            elif key in {"data_dir", "db_path", "archive_dir"}:
                 value = Path(value)
             kwargs[key] = value
         return cls(**kwargs)
