@@ -1,6 +1,6 @@
 # 0004 门户全量抓取、正文与附件归档
 
-- Status: draft（决策已确认，待批准开工）
+- Status: draft（决策已全部确认，待开工）
 - Owner: MoMoJee
 - Created: 2026-09-18
 - Related: [reference/portal-notice-types.md](../reference/portal-notice-types.md)、`core/fetcher.py`、`core/sources.py`
@@ -49,9 +49,7 @@
 11. **内联图片也下载**；正文接口提供两种输出：`纯 HTML（保留原始链接）` 与 `压缩包（HTML + 图片，链接不改写）`。
 12. **`enrich_contents` 与 `fetch_detail` 合并**为单一正文抓取路径（废弃旧方法）。
 13. 执行前述安全/运维项：`/files` 防路径穿越、未配置账号时匿名回退、下载与列表共用会话的失效处理。
-
-### 待确认的小项
-- 首次运行/回填：`push_max_age_days`（30 天）内的历史通知会被 webhook 推送。全量 type 下首跑量较大，是否默认**回填不推送**（只入库+按窗口归档）？倾向默认开启。
+14. **回填不推送（默认开启）**：**首次启动的首轮抓取**以及**手动抓取历史**视为「回填」，只入库 + 按时间窗归档，默认**不触发 webhook 推送**；可通过 `backfill_push`（默认 `false`）开启。正常轮询产生的新通知照常推送。回填状态需持久化（首轮标记），手动抓取在请求中显式标记为回填。
 
 ## 方案（设计）
 
@@ -64,6 +62,7 @@
   - **后台队列**：`asyncio.Queue` + `archive_workers` 个 worker，启动于 `initialize()`；`enqueue(notice, force=False)` 立即返回。
   - `archive(detail)`、`download(att, dest)`、`evict_to_limit()`（按 `last_access_at` 升序删到上限内）。
 - **engine（编排）**：`poll_once` 去重后只**入队**（不 await 下载）；`Archiver` 协议与 `Publisher` 同款解耦；`archive_enable=False` 时不启用。
+  - **回填标记**：区分「正常轮询」与「回填」（首轮持久化标记 / 手动请求标记）。回填只入库 + 按窗口归档，默认不推送；`backfill_push=True` 时才推送。
 - **storage**：新增文件表 `assets(notice_id, kind, filename, local_path, size, sha1, first_download_at, last_access_at)`；读取通知/文件时更新 `last_access_at`；**不存正文全文**。
 - **transport**：
   - `GET /api/notices/{id}/content`（HTML，原始链接）
@@ -77,6 +76,7 @@
   - `archive_window_days`（`MNE_ARCHIVE_WINDOW_DAYS`，默认 90）
   - `archive_floor_date`（`MNE_ARCHIVE_FLOOR_DATE`，默认 `2026-08-31`）
   - `archive_total_limit_gb`（`MNE_ARCHIVE_TOTAL_LIMIT_GB`，默认 64）
+  - `backfill_push`（`MNE_BACKFILL_PUSH`，默认 `false`）
 - **目录结构**：
 
 ```
@@ -107,6 +107,7 @@ data/archive/<source_key>/<notice_id>/
 - 单元：翻页解析 `page`；`fetch_detail` 解析 `notice_annext`；`ArchiveStore` 用 mock HTTP + 离线 fixture 验证落盘、文件名安全化、HTML 响应判失败；`evict_to_limit` 按 `last_access_at` 淘汰。
 - 集成：`notice_id=358513` → 下载 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`（带 Cookie 200 + `content-disposition`）。
 - 集成：自动窗口（cutoff）下旧通知不入队；手动 `POST /api/notices/{id}/archive` 可强制归档。
+- 集成：首轮回填与手动抓取**默认不触发 webhook**；`MNE_BACKFILL_PUSH=true` 时才推送。
 - REST：`/content`、`/content.zip`、`/files` 正常返回；访问后 `last_access_at` 更新。
 
 ## 任务拆分
@@ -117,6 +118,7 @@ data/archive/<source_key>/<notice_id>/
 - [ ] `core/archive.py`：`ArchiveStore` + 后台队列 + LRU 淘汰
 - [ ] `rss_max_items` 改为只约束 `write_rss`
 - [ ] engine 入队编排 + `Archiver` 协议
+- [ ] 回填标记（首轮持久化 / 手动请求）+ 推送抑制（`backfill_push`）
 - [ ] storage `assets` 表 + `last_access_at` 维护
 - [ ] REST：content / content.zip / files / 手动 archive / 参数化 check（防路径穿越）
 - [ ] 配置项 + `.env.example` / `config.example.toml`
