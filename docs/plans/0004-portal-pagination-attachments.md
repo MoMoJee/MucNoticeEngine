@@ -1,131 +1,90 @@
-# 0004 门户翻页、补齐 type、正文与附件落盘
+# 0004 门户全量抓取、正文与附件归档
 
-- Status: draft（待开发者确认后实施）
+- Status: draft（决策已确认，待批准开工）
 - Owner: MoMoJee
 - Created: 2026-09-18
 - Related: [reference/portal-notice-types.md](../reference/portal-notice-types.md)、`core/fetcher.py`、`core/sources.py`
 
 ## 背景与目标
 
-现状缺口：
-
-- 门户每个 type 只抓**第 1 页 20 条**，推免名额分配等通知在第 2–3 页，抓不到。
-- 只接入门户 `type=5/6/8/32`，**公示公告（11）、就业信息（10）等未接入**。
-- 公开源只存标题+链接，**正文不抓**；附件和正文都**不落盘**。
+现状缺口：门户每类只抓第 1 页 20 条、只接入 `type=5/6/8/32`、公开源只存标题、正文与附件都不落盘。
 
 目标：
 
-1. 门户来源支持**翻页抓取**（可配置页数上限）。
-2. 补齐被忽略的 type，重点是 **11 公示公告**（推免名单/细则）、可选 10 就业信息。
-3. 抓取并**落盘**通知正文（原文 HTML + 纯文本）与附件/图片到独立文件夹；**数据库不存正文全文**。
+1. 门户**翻页**抓取，并抓取**全部有效 type**。
+2. 正文、附件、内联图片**落盘**到文件夹；数据库只存预览与文件索引。
+3. 归档走**后台队列**，不阻塞轮询；设总量上限并按访问时间淘汰。
+4. 支持**手动**按需抓取历史（绕过自动时间窗），自动/手动共用同一管线。
 
-## 调研结论（2026-09-18 实测，未改代码）
+## 调研结论（2026-09-18 实测）
 
-### 1. 门户翻页：可行
+### 门户翻页：可行
+- `datas.page` 提供 `total`（总条数）/`totalCounts`（总页数）/`currentPage`/`pageSize`；`currentPage` 翻页有效，超界返回空。例：type=11 total=2315。
 
-- API 响应 `datas.page` 提供分页元数据：`total`（总条数）、`totalCounts`（总页数）、`currentPage`、`pageSize`。
-- `currentPage` 直接传值即可翻页；超出范围返回空数组。
-- 实测：`type=11` `total=2315`、`totalCounts=116`（pageSize=20）；`type=5` `total=2315`。
-- 结论：**零障碍**，循环 `currentPage` 到 `pageLimit` 或 `totalCounts` 即可。
+### 官方 type 名称（字段 `notice_type_name`）
+`1 新华网`、`3 民委要闻`、`4 时政头条`、`5 办公通知`、`6 教学通知`、`8 科研通知`、`9 校园新闻`、`10 就业信息`、`11 公示公告`、`32 学工通知`、`36 活动报道`。本次决定**全部抓取**。推免信息分散在 `6`（遴选/名额）与 `11`（名单/细则）。
 
-### 2. 官方 type 名称（来自响应字段 `notice_type_name`）
+### 正文：可行
+- 门户 `notice_content` 为完整 HTML；公开源正文容器 `.v_news_content`/`#vsb_content` 抽样均命中（少数页面正文为空，需 fallback）。
+- **bug**：`grs_yjszs` 的 `base_url` 指向站点根，导致链接 404（应在 `/yjsyzsw/`）。
 
-| type | 官方名称 | 归类 | 已接入 |
-| --- | --- | --- | --- |
-| 1 | 新华网 | 新闻 | 否 |
-| 3 | 民委要闻 | 新闻 | 否 |
-| 4 | 时政头条 | 新闻 | 否 |
-| 5 | 办公通知 | 通知 | 是 |
-| 6 | 教学通知 | 通知 | 是 |
-| 8 | 科研通知 | 通知 | 是 |
-| 9 | 校园新闻 | 新闻 | 否 |
-| 10 | 就业信息 | 就业 | 否 |
-| 11 | 公示公告 | 公示 | 否 |
-| 32 | 学工通知 | 通知 | 是 |
-| 36 | 活动报道 | 新闻 | 否 |
+### 附件：可行且普遍（需更正早前结论）
+- **详情接口**：`POST /comsys-portal-notice-web/getNotice`（form `notice_id`）→ `datas.notice_info`，附件在 `notice_annext[]`：`notice_annex_id`(UUID)、`notice_annex_name`(文件名)、`notice_annex_path`、`suffix`、`type`。
+- **下载**：`GET /comsys-portal-notice-web/download?id=<annex_id>&notice_id=<id>`，**需登录**；无 Cookie 返回 `200 text/html`（登录页），必须校验 `content-disposition`。
+- 抽样 5 类 × 10 条：**44% 通知带文件附件**（type=6 8/10、type=11 6/10、type=32 6/10）。
+- `notice_content` 内还有**内联图片** `<img>`，本次决定一并下载。
 
-- 事务相关且值得接入：**11（必须）、10（可选）**。
-- 新闻类 `1/3/4/9/36` 不建议进通知流。
-- 推免信息：**遴选/名额在 6，名单/实施细则在 11**。
-- 此前根据采样推断的名称（如 1=民大要闻、9=学校新闻、36=院系动态）以本表官方名为准。
-- 待复核：采样中 `type=1` 与 `type=9` 首屏标题高度一致，疑似内容重叠，实施前需确认去重策略。
+## 已确认决策（Decision Log）
 
-### 3. 正文解析：可行
+1. **`rss_max_items` 只约束 RSS 输出**：`fetch_notices` 不再截断，改由 `write_rss` 内部截断。抓取/存储/归档/推送不受它限制。
+2. **`Notice` 新增 `external_id`**：门户存 `notice_id`，公开源存文章标识；`fetch_detail` 用它调 `getNotice`（不再从 link 正则抠）。
+3. **不做数据库迁移**：现有库无有用数据，直接删除 `data/muc_notice.db` 重建；文档注明改 schema 需清库。
+4. **归档用后台队列**（`asyncio.Queue` + 若干 worker）。当前项目**没有任何现成队列机制**，本计划新建。
+5. **统一 URL 拼接基准**：改用当前 `page_url` 做 `urljoin`，移除易错的硬编码 `base_url`（覆盖 `grs_yjszs` 及其它同风险来源）。
+6. **门户抓取全部有效 type**（1/3/4/5/6/8/9/10/11/32/36），**不做关键词过滤**（type=11 的采购噪声一并入库）。
+7. **自动归档时间窗**：`cutoff = max(2026-08-31T00:00:00+08:00, now - archive_window_days)`，二者取**较晚者**；`archive_window_days` 默认 **90**。仅 `published_at >= cutoff` 的通知被**自动**归档。
+8. **手动抓取可绕过时间窗**：手动抓到的通知同样入库、可按需归档；**自动与手动共用同一 fetch→store→archive 管线**，仅触发方式与是否受窗口约束不同。
+9. **`content` 保留为预览**：门户前 2000 字纯文本；完整原文/附件落盘。REST 返回预览。
+10. **归档总量上限 64GB**（环境变量）；数据库维护**文件表**记录通知↔落盘文件（正文原文、附件）关系、**首次下载时间**、**最近访问时间**；超限时按**最近访问时间升序**淘汰。
+11. **内联图片也下载**；正文接口提供两种输出：`纯 HTML（保留原始链接）` 与 `压缩包（HTML + 图片，链接不改写）`。
+12. **`enrich_contents` 与 `fetch_detail` 合并**为单一正文抓取路径（废弃旧方法）。
+13. 执行前述安全/运维项：`/files` 防路径穿越、未配置账号时匿名回退、下载与列表共用会话的失效处理。
 
-- 门户：`notice_content` 是完整 HTML（UEditor），当前只截 2000 字纯文本；应改为保存**完整 HTML** + 提取纯文本。
-- 公开源：正文容器 `.v_news_content` / `#vsb_content` 在 `www`、`rsc`、`grs` 抽样**均命中**；少数页面正文长度为 0（如“章程”），需 fallback（放宽选择器 / 取最大文本块）。
-- **发现 bug**：`grs_yjszs` 的 `base_url` 写成站点根 `https://grs.muc.edu.cn/`，但列表页在子目录 `/yjsyzsw/`，导致所有链接拼成 `.../info/...` 返回 **404**。修正做法：改用 `page_url` 作为 `urljoin` 基准，或把 `base_url` 设为 `https://grs.muc.edu.cn/yjsyzsw/`。
-- 结论：**正文下载可行**，但依赖先修 URL bug。
+### 待确认的小项
+- 首次运行/回填：`push_max_age_days`（30 天）内的历史通知会被 webhook 推送。全量 type 下首跑量较大，是否默认**回填不推送**（只入库+按窗口归档）？倾向默认开启。
 
-### 4. 附件解析：**可行且是重点**（更正早前结论）
+## 方案（设计）
 
-早前只看 `notice_content` 的 `<a href>`，因此误判“附件很少”。实际附件在**独立字段**里：
+> 职责拆分：发现附件（门户特有）留 fetcher；下载/落盘/淘汰（与来源无关）放 `core/archive.py`；引擎只入队编排。
 
-- **详情接口**：`POST /comsys-portal-notice-web/getNotice`，表单 `notice_id=<id>`，返回 `datas.notice_info`。
-- 附件列表在 `notice_info.notice_annext[]`，每项包含：
-
-| 字段 | 含义 |
-| --- | --- |
-| `notice_annex_id` | 文件 UUID（下载时作 `id`） |
-| `notice_annex_name` | 文件名（含中文，如 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`） |
-| `notice_annex_path` | 服务器路径 `/data/notice_upload_file/<uuid>/<name>` |
-| `suffix` | 扩展名（xlsx/pdf/docx/jpg…） |
-| `type` | 可见范围标记 |
-
-- **下载接口**：`GET /comsys-portal-notice-web/download?id=<annex_id>&notice_id=<notice_id>`。
-- **需要登录**：无 Cookie 请求返回 `200 text/html`（登录页，约 11KB），带 Cookie 才返回真实文件（`application/octet-stream` + `content-disposition: attachment;filename="..."`）。因此**必须用已认证会话下载，并校验 `content-disposition`/大小**，不能只看状态码。
-
-**附件普遍程度（抽样 5 类 × 10 条，2026-09-18）**：
-
-| type | 有附件的通知 |
-| --- | --- |
-| 5 办公通知 | 1/10 |
-| 6 教学通知 | **8/10** |
-| 8 科研通知 | 1/10 |
-| 11 公示公告 | **6/10** |
-| 32 学工通知 | 6/10 |
-| 合计 | **22/50 = 44%** |
-
-- 结论：**附件解析可行且必要**。正文 `notice_content` 里写“见附件”但本身不含链接，所以必须**额外调用 `getNotice` 拿附件列表**，再按 `notice_annext` 下载。
-- 公开源：抽样文章未见文件型附件，主要是内联图片（新闻页最多 9 张）；推免“合集”正文是**各学院官网链接**（跨站），可作为相关链接保存。
-
-### 5. 落盘与鉴权
-
-- 门户正文 HTML 与附件均需登录会话；下载要带 Cookie 并校验 `content-disposition`，失败（返回 HTML）时跳过。
-- 附件可能同名、含中文与特殊字符，落盘需安全化文件名。
-- 需处理：重定向、`Referer`、超时、单文件大小上限、并发限速、失败跳过。
-
-## 方案（设计，暂不实现）
-
-> 职责拆分原则：**发现附件（门户特有）留 fetcher，下载/落盘（与来源无关）放独立模块，引擎只做编排。**
-
-- **配置新增**：`portal_page_limit`（每类翻页上限，默认 3）、`archive_enable`（默认 true）、`archive_dir`（默认 `data/archive`）、`archive_download_files`、`archive_max_file_mb`、`archive_max_per_notice`。
-- **数据模型**（`core/models.py`）：
-  - `Attachment(notice_id, annex_id, name, suffix, kind)`，`kind ∈ {file, image, link}`。
-  - `NoticeDetail(notice, content_html, attachments)`。
-- **fetcher —— 只负责「发现」，不碰文件系统**：
-  - 门户来源按 `currentPage` 循环到 `pageLimit` 或 `totalCounts`。
-  - 新增 `async def fetch_detail(notice) -> NoticeDetail | None`：门户调 `getNotice` 取完整 `notice_content` 与 `notice_annext`；公开源抓正文 HTML。
-  - 修正 `grs_yjszs` 的 URL 拼接。
-- **新增 `core/archive.py` —— 只负责「取存」**：
-  - `ArchiveStore(settings, auth_service)`：目录布局、文件名安全化、单文件大小上限、sha1、原子写、`meta.json`、限速/并发。
-  - `async def archive(detail) -> ArchiveResult`：落盘 `content.html` / `content.txt`，遍历 `attachments` 调 `download` 存入 `files/`，返回已存清单（含失败项）。
-  - `async def download(att, dest_dir) -> Path | None`：带认证 GET，校验 `content-disposition`（返回 HTML 登录页视为失败），逐项失败跳过。
-  - 与来源无关：门户/公开源共用；不得 import transport。
-- **engine —— 只负责「编排」**：
-  - 定义 `Archiver` 协议（与 `Publisher` 同款解耦）：`async def archive(self, detail: NoticeDetail) -> ArchiveResult | None`。
-  - `poll_once` 去重后，只对**新通知**调用 `archiver.archive(...)`；`archive_enable=False` 时不注入。
-- **storage**：`notices` 增加 `archive_dir`；新表 `attachments(notice_id, annex_id, name, suffix, kind, local_path, size, sha1)`；由 storage 落库（ArchiveStore 只返回结果，不直接写库）。**不存正文全文**。
-- **sources**：新增 `type=11` 公示公告（带关键词过滤）、可选 `type=10` 就业信息；新增 source 级 `title_include` / `title_exclude`（复用 `parsers.py` 中已有的关键词函数）。
-- **transport**：`GET /api/notices/{id}/content`、`GET /api/notices/{id}/files`；REST `q` 可扩展为标题+正文搜索（可后置）。
+- **模型**（`core/models.py`）：`Notice` 加 `external_id`；`Attachment(notice_id, annex_id, name, suffix, kind)`（`kind ∈ {file,image}`）；`NoticeDetail(notice, content_html, attachments)`。
+- **fetcher（发现，不碰文件系统）**：全量 type + 翻页；`fetch_detail(notice) -> NoticeDetail`；统一 urljoin。
+- **新增 `core/archive.py`（取存 + 队列）**：
+  - `ArchiveStore(settings, auth_service)`：目录布局、文件名安全化、单文件大小上限、sha1、原子写、`meta.json`。
+  - **后台队列**：`asyncio.Queue` + `archive_workers` 个 worker，启动于 `initialize()`；`enqueue(notice, force=False)` 立即返回。
+  - `archive(detail)`、`download(att, dest)`、`evict_to_limit()`（按 `last_access_at` 升序删到上限内）。
+- **engine（编排）**：`poll_once` 去重后只**入队**（不 await 下载）；`Archiver` 协议与 `Publisher` 同款解耦；`archive_enable=False` 时不启用。
+- **storage**：新增文件表 `assets(notice_id, kind, filename, local_path, size, sha1, first_download_at, last_access_at)`；读取通知/文件时更新 `last_access_at`；**不存正文全文**。
+- **transport**：
+  - `GET /api/notices/{id}/content`（HTML，原始链接）
+  - `GET /api/notices/{id}/content.zip`（HTML + 图片）
+  - `GET /api/notices/{id}/files`（清单/单文件下载，防路径穿越）
+  - `POST /api/notices/{id}/archive`（手动强制归档）
+  - `POST /api/check` 支持参数（source/type/页数/since）用于手动抓取历史
+- **配置**（遵循现有 `MNE_` 环境变量映射）：
+  - `portal_page_limit`（默认 3）
+  - `archive_enable`、`archive_dir`（默认 `data/archive`）、`archive_workers`、`archive_max_file_mb`、`archive_max_per_notice`
+  - `archive_window_days`（`MNE_ARCHIVE_WINDOW_DAYS`，默认 90）
+  - `archive_floor_date`（`MNE_ARCHIVE_FLOOR_DATE`，默认 `2026-08-31`）
+  - `archive_total_limit_gb`（`MNE_ARCHIVE_TOTAL_LIMIT_GB`，默认 64）
 - **目录结构**：
 
 ```
 data/archive/<source_key>/<notice_id>/
-├── content.html      # 原文 HTML
+├── content.html      # 原始 HTML（保留原始链接）
 ├── content.txt       # 纯文本
-├── meta.json         # 标题/来源/URL/时间/附件清单
-└── files/            # 下载的附件与图片
+├── meta.json         # 元数据 + 附件清单
+└── files/            # 附件与内联图片
 ```
 
 ## 影响面
@@ -133,29 +92,32 @@ data/archive/<source_key>/<notice_id>/
 - core：**新增 `archive.py`**；改 `fetcher.py`、`engine.py`、`models.py`、`storage.py`、`sources.py`、`config.py`
 - transport：`api.py`
 - 配置：`config.example.toml`
-- 文档：`docs/architecture.md`（新增归档模块与数据流）
-- 数据/schema：`notices` 加列 + 新增 `attachments` 表（无迁移框架，需人工或重建）
+- 文档：`docs/architecture.md`（新增归档模块/队列/数据流）
+- 数据：删除旧库重建；新增 `assets` 表
 
 ## 风险与备选
 
-- 选择器与 type 可能随学校改版失效；`file://` 垃圾链接；下载量/磁盘/带宽与限速；附件的版权与隐私（仅个人内网使用，不公开传播）。
-- 备选：正文只存纯文本不存 HTML。否决：会丢失附件与格式信息。
+- 全量 type 数据量大（type=4 时政 12806 条）：靠时间窗 + 页数上限 + 后台队列限速控制。
+- 下载可能非常多：队列限速、单文件/单通知上限、64GB 总量 LRU。
+- 附件版权与隐私：仅个人内网使用，不公开传播。
+- 备选：正文只存纯文本。否决：会丢失附件与格式。
 
 ## 验证方式
 
-- 单元：翻页解析 `page` 元数据；`fetch_detail` 解析 `notice_annext`；`ArchiveStore` 用「mock HTTP + 离线 fixture」验证落盘、文件名安全化、HTML 响应判失败（不需要真实登录）。
-- 集成：对 `notice_id=358513` 走 `getNotice` → 下载 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`（实测带 Cookie 可 200 + `content-disposition`，27391 字节）。
-- 集成：对 `type=6/11` 抓多页，确认 9/9、9/10 名额分配通知入库且附件归档成功。
-- REST：`GET /api/notices/{id}/files` 能列出并取到本地文件。
+- 单元：翻页解析 `page`；`fetch_detail` 解析 `notice_annext`；`ArchiveStore` 用 mock HTTP + 离线 fixture 验证落盘、文件名安全化、HTML 响应判失败；`evict_to_limit` 按 `last_access_at` 淘汰。
+- 集成：`notice_id=358513` → 下载 `【0906更新-公示】附件5：理学院拟推荐名单.xlsx`（带 Cookie 200 + `content-disposition`）。
+- 集成：自动窗口（cutoff）下旧通知不入队；手动 `POST /api/notices/{id}/archive` 可强制归档。
+- REST：`/content`、`/content.zip`、`/files` 正常返回；访问后 `last_access_at` 更新。
 
 ## 任务拆分
 
-- [ ] 修复 `grs_yjszs` URL 拼接
-- [ ] 门户翻页 + `portal_page_limit` 配置
-- [ ] 接入 `type=11` / `type=10` + 关键词过滤
-- [ ] 模型：`Attachment` / `NoticeDetail`
-- [ ] fetcher：`fetch_detail`（发现正文与附件，不落盘）
-- [ ] `core/archive.py`：`ArchiveStore`（下载/落盘/校验）+ `Archiver` 协议
-- [ ] engine：对新通知编排归档
-- [ ] storage：`archive_dir` + `attachments` 表 + REST 文件接口
-- [ ] 测试与文档（changelog、architecture、config 示例）
+- [ ] 统一 URL 拼接基准（移除硬编码 `base_url`）
+- [ ] `Notice.external_id` + 全量 type + 门户翻页
+- [ ] `fetch_detail`（`getNotice` → HTML + 附件/图片）并合并 `enrich_contents`
+- [ ] `core/archive.py`：`ArchiveStore` + 后台队列 + LRU 淘汰
+- [ ] `rss_max_items` 改为只约束 `write_rss`
+- [ ] engine 入队编排 + `Archiver` 协议
+- [ ] storage `assets` 表 + `last_access_at` 维护
+- [ ] REST：content / content.zip / files / 手动 archive / 参数化 check（防路径穿越）
+- [ ] 配置项 + `.env.example` / `config.example.toml`
+- [ ] 测试与文档（changelog、architecture、规范编号说明）

@@ -12,7 +12,8 @@
 ## 文件命名
 
 - 一律使用 `NNNN-kebab-topic.md`：`0001-bootstrap-engine.md`。
-- `NNNN` 为四位、从 0001 递增、**不复用不回收**；计划与变更日志编号一一对应。
+- `NNNN` 为四位、从 0001 递增、**不复用不回收**；计划与变更日志编号**尽量一一对应**。
+- 例外：**纯分析/调研类**的 changelog 可以没有对应 plan（此时编号只占用 changelog 序列）。
 - `kebab-topic` 用简短英文（本仓库文档正文用中文），例如 `webhook-retry`、`source-dedup`。
 - 根级长期文档使用固定名：`index.md`、`architecture.md`。不允许 `new.md`、`temp.md`、`最终版.md`。
 
