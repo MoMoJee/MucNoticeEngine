@@ -13,6 +13,7 @@
 | --- | --- | --- |
 | [0001](0001-bootstrap-engine.md) | 从 AstrBot 插件剥离独立通知引擎 | done |
 | [0002](0002-dotenv-config.md) | 支持从 .env 读取配置 | done |
+| [0004](0004-portal-pagination-attachments.md) | 门户翻页、补齐 type、正文与附件落盘 | draft |
 
 ## 模板
 
