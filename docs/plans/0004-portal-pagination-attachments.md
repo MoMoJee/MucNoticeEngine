@@ -1,6 +1,6 @@
 # 0004 门户全量抓取、正文与附件归档
 
-- Status: draft（决策已全部确认，待开工）
+- Status: done（2026-09-18 交付，见 [changelog/0004](../changelog/0004-portal-pagination-attachments.md)）
 - Owner: MoMoJee
 - Created: 2026-09-18
 - Related: [reference/portal-notice-types.md](../reference/portal-notice-types.md)、`core/fetcher.py`、`core/sources.py`
@@ -124,15 +124,15 @@ data/archive/<source_key>/<external_id>/
 
 ## 任务拆分
 
-- [ ] 修复认证边界 bug（CAS 有效但 comsys 失效时登录页 302 被当异常）
-- [ ] 统一 URL 拼接基准（移除硬编码 `base_url`）
-- [ ] `Notice.external_id` + 全量 type + 门户翻页
-- [ ] `fetch_detail`（`getNotice` → HTML + 附件/图片）并合并 `enrich_contents`
-- [ ] `core/archive.py`：`ArchiveStore` + 后台队列 + LRU 淘汰
-- [ ] `rss_max_items` 改为只约束 `write_rss`
-- [ ] engine 入队编排 + `Archiver` 协议
-- [ ] 回填标记（首轮持久化 / 手动请求）+ 推送抑制（`backfill_push`）
-- [ ] storage `assets` 表 + `last_access_at` 维护
-- [ ] REST：content / content.zip / files / 手动 archive / 手动 check（`from_page`/`to_page`/`searchValue`；防路径穿越）
-- [ ] 配置项 + `.env.example` / `config.example.toml`
-- [ ] 测试与文档（changelog、architecture、规范编号说明）
+- [x] 修复认证边界 bug（CAS 有效但 comsys 失效时登录页 302 被当异常）
+- [x] 统一 URL 拼接基准（移除硬编码 `base_url`）
+- [x] `Notice.external_id` + 全量 type + 门户翻页
+- [x] `fetch_detail`（`getNotice` → HTML + 附件/图片）并合并 `enrich_contents`
+- [x] `core/archive.py`：`ArchiveStore` + 后台队列 + LRU 淘汰
+- [x] `rss_max_items` 改为只约束 `write_rss`
+- [x] engine 入队编排 + `Archiver` 协议
+- [x] 回填标记（首轮持久化 / 手动请求）+ 推送抑制（`backfill_push`）
+- [x] storage `assets` 表 + `last_access_at` 维护
+- [x] REST：content / content.zip / files / 手动 archive / 手动 check（`from_page`/`to_page`/`searchValue`；防路径穿越）
+- [x] 配置项 + `.env.example` / `config.example.toml`
+- [x] 测试与文档（changelog、architecture、规范编号说明）

@@ -31,13 +31,14 @@ src/muc_notice_engine/
 ├── config.py            # Settings 数据类 + config.toml/环境变量加载
 ├── cli.py               # argparse 入口：run / poll / sources / rss
 ├── core/                # 核心引擎（禁止 import transport / 第三方 Web 框架）
-│   ├── models.py        # Notice / SourceConfig
-│   ├── sources.py       # 14 个来源配置（新增来源改这里）
+│   ├── models.py        # Notice / Attachment / NoticeDetail / SourceConfig
+│   ├── sources.py       # 21 个来源配置（10 公开 + 11 门户 type；新增来源改这里）
 │   ├── parsers.py       # HTML -> 标题 解析函数
 │   ├── auth.py          # SM2 登录 + Cookie 持久化
-│   ├── fetcher.py       # 抓取 HTML/API，生成 Notice 与 RSS
-│   ├── storage.py       # SQLite 存储 + 去重
-│   ├── engine.py        # 轮询调度 + Publisher 协议
+│   ├── fetcher.py       # 抓取 HTML/API、详情正文与附件，生成 Notice 与 RSS
+│   ├── archive.py       # 正文/附件落盘 + 后台队列 + LRU 淘汰
+│   ├── storage.py       # SQLite 存储 + 去重 + assets/meta
+│   ├── engine.py        # 轮询调度 + Publisher / Archiver 协议
 │   └── rendering.py     # 可选：matplotlib 卡片图
 └── transport/           # 传输层（可 import core，反向禁止）
     ├── api.py           # FastAPI 路由
@@ -54,8 +55,9 @@ tests/                                  # pytest
 | --- | --- |
 | 新增/修改一个通知来源 | `core/sources.py`，然后拆解析函数到 `core/parsers.py` |
 | 改抓取规则/日期解析 | `core/fetcher.py` |
+| 改正文/附件落盘、淘汰、后台队列 | `core/archive.py` |
 | 改去重、查询、存储字段 | `core/storage.py`（改 schema 需同步 changelog 的迁移说明） |
-| 改轮询或新增事件消费者 | `core/engine.py`（实现 `Publisher` 协议） |
+| 改轮询或新增事件消费者 | `core/engine.py`（实现 `Publisher` / `Archiver` 协议） |
 | 加 REST 接口 | `transport/api.py` |
 | 改 webhook 负载/签名 | `transport/publishers.py` |
 | 改配置项 | `config.py` + `config.example.toml` + `_conf` 文档同步 |
