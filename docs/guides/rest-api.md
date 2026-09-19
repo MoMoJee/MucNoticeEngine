@@ -3,13 +3,14 @@
 服务默认监听 `http://127.0.0.1:8080`（部署机为 `8085`），启动方式见 [README](../../README.md)。
 浏览器打开 `/docs` 有可交互的 Swagger UI；本文补充「参数语义、限制、怎么用」。
 
-> 改了任何接口/参数/语义，必须同步本文件与 `README.md` 的接口表，见
+> 改了任何接口/参数/语义，必须同步本文件、`README.md` 的接口表与
+> `/llms.txt`（`transport/llm_txt.py`），见
 > [conventions/docs.md](../conventions/docs.md) 的同步矩阵。
 
 ## 认证
 
-- 配置 `api_token`（`MNE_API_TOKEN`）后，除 `/`、`/health`、`/docs`、`/redoc`、`/openapi.json`
-  外的接口都需要 `Authorization: Bearer <token>`。
+- 配置 `api_token`（`MNE_API_TOKEN`）后，除 `/`、`/health`、`/docs`、`/redoc`、`/openapi.json`、
+  `/llms.txt`（及 `/llm.txt` 301 跳转）外的接口都需要 `Authorization: Bearer <token>`。
 - 未配置 token 时全部公开。
 
 ```bash
@@ -20,7 +21,8 @@ curl -H 'Authorization: Bearer <token>' http://127.0.0.1:8080/api/notices
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/` | 引导页，链接到 `/docs` |
+| GET | `/` | 引导页，链接到 `/docs` 与 `/llms.txt` |
+| GET | `/llms.txt` | Agent 入口索引（只指路不复制文档；`/llm.txt` 301 跳转） |
 | GET | `/health` | 健康检查 + 归档队列状态（始终公开） |
 | GET | `/api/sources` | 来源列表（32 个：21 公开 + 11 门户 type） |
 | GET | `/api/notices` | 查询通知（`source`/`category`/`since`/`q`/`limit`/`offset`） |

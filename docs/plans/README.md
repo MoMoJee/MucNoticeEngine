@@ -18,6 +18,7 @@
 | [0006](0006-retention-first-seen.md) | 保留期改为按入库时间且默认关闭 | done |
 | [0008](0008-lxy-xingong-sources.md) | 理学院 / 信息工程学院公开来源接入 | done |
 | [0009](0009-aop-search-api.md) | AOP 智能搜索接口（远程检索） | done |
+| [0010](0010-agent-entry-llms-txt.md) | Agent 入口：/llms.txt 与首页引导 | done |
 
 ## 模板
 

@@ -28,6 +28,13 @@
 5. **单一入口**：新文档必须登记到 `docs/index.md` 的文档地图。
 6. **过期的直接删/改**：不要保留「已废弃」段落，历史留给 git。
 
+## /llms.txt（Agent 入口，与接口文档同级）
+
+- 路径：`GET /llms.txt`（内容在 `transport/llm_txt.py`；`/llm.txt` 301 跳转）。
+- 只做指路：链接 + 一句话摘要，**不复制** rest-api / reference 的细则，避免两处维护。
+- **必须随开发同步**：接口路径、参数上限、认证规则、文档路径变化时一起更新；
+  提交前对照上方清单检查。
+
 ## 计划（plan）规范
 
 - 位置：`docs/plans/NNNN-kebab-topic.md`，模板见 [plans/README.md](../plans/README.md)。
@@ -50,8 +57,8 @@
 
 | 代码变更 | 必须同步 |
 | --- | --- |
-| REST 路径 / 参数 / 响应结构 | `docs/guides/rest-api.md` + `README.md` 接口表 |
-| 查询 / 搜索 / 分页 / 排序语义 | `docs/guides/rest-api.md` |
+| REST 路径 / 参数 / 响应结构 | `docs/guides/rest-api.md` + `README.md` 接口表 + `transport/llm_txt.py`（`/llms.txt`） |
+| 查询 / 搜索 / 分页 / 排序语义 | `docs/guides/rest-api.md` + `transport/llm_txt.py`（`/llms.txt` 摘要） |
 | 归档 / 淘汰 / 回填 / 时间窗语义 | `docs/guides/rest-api.md` + `docs/architecture.md` |
 | 新增配置项或默认值变化 | `config.example.toml` + `.env.example` + `docs/guides/rest-api.md`（影响使用时） |
 | 新增/删除来源、门户 type 变化 | `docs/reference/portal-notice-types.md`（含 CSV） |
@@ -63,6 +70,7 @@
 
 - [ ] 新增/删除文档是否更新了 `docs/index.md`？
 - [ ] 按上方「同步矩阵」检查了本次改动涉及的指导文档？
+- [ ] 接口路径/参数/上限或文档路径有变化时，是否同步了 `/llms.txt`（`transport/llm_txt.py`）？
 - [ ] `README.md` 的接口表/特性数字是否仍然正确？
 - [ ] 改动了 `core`/`transport` 边界，是否更新了 `architecture.md`？
 - [ ] 新增配置项，是否同步了 `config.example.toml` / `.env.example`？

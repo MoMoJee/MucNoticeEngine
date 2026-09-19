@@ -71,6 +71,8 @@ tests/                                  # pytest
 
 1. **先计划后实现**：功能开发前先在 `docs/plans/` 建计划，见 [plans/README.md](plans/README.md)。
 2. **交付必写变更日志**：每次交付在 `docs/changelog/` 建条目，见 [changelog/README.md](changelog/README.md)。
-3. **只写可验证内容**：命令必须能直接复制运行；与代码冲突时以代码/`config.example.toml` 为准。
-4. **不重复叙述**：能从代码或配置看出的，不搬到文档里；文档只解释「为什么」和「怎么用」。
-5. **改边界同步 architecture**：`core`/`transport` 边界变化必须更新 `architecture.md`。
+3. **Agent 入口同步**：接口/参数/文档路径变化时同步 `/llms.txt`（`transport/llm_txt.py`），
+   规则见 [conventions/docs.md](conventions/docs.md)。
+4. **只写可验证内容**：命令必须能直接复制运行；与代码冲突时以代码/`config.example.toml` 为准。
+5. **不重复叙述**：能从代码或配置看出的，不搬到文档里；文档只解释「为什么」和「怎么用」。
+6. **改边界同步 architecture**：`core`/`transport` 边界变化必须更新 `architecture.md`。

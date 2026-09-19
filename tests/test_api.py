@@ -85,8 +85,24 @@ def test_index_links_to_docs(tmp_path):
     resp = _client(tmp_path).get("/")
     assert resp.status_code == 200
     assert "/docs" in resp.text
+    assert "/llms.txt" in resp.text
     assert "/api/search/sites" in resp.text
     assert "docs/guides/rest-api.md" in resp.text
+
+
+def test_llms_txt_endpoints(tmp_path):
+    client = _client(tmp_path)
+
+    resp = client.get("/llms.txt")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert "docs/guides/rest-api.md" in resp.text
+    assert "docs/reference/aop-search.md" in resp.text
+    assert "/api/search/sites" in resp.text
+
+    alias = client.get("/llm.txt")
+    assert alias.status_code == 200
+    assert "docs/guides/rest-api.md" in alias.text
 
 
 def test_rss_endpoint_declares_utf8_charset(tmp_path):
@@ -121,6 +137,7 @@ def test_sources_endpoint_lists_all(tmp_path):
 def test_token_required_when_configured(tmp_path):
     client = _client(tmp_path, token="secret")
     assert client.get("/api/notices").status_code == 401
+    assert client.get("/llms.txt").status_code == 200
     ok = client.get("/api/notices", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
 

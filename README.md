@@ -38,11 +38,13 @@ uv run muc-notice-engine run            # 启动服务（默认 http://127.0.0.1
 ## REST API
 
 启动后浏览器打开 **`/`** 有引导页，**`/docs`** 是 Swagger UI。
+自动化 / Agent 调用先读 **`/llms.txt`**（入口索引，`/llm.txt` 301 跳转）。
 完整参数、语义与历史回填步骤见 **[docs/guides/rest-api.md](docs/guides/rest-api.md)**。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/` | 引导页（链接到 `/docs`） |
+| GET | `/` | 引导页（链接到 `/docs` 与 `/llms.txt`） |
+| GET | `/llms.txt` | Agent 入口索引（`/llm.txt` 301 跳转） |
 | GET | `/health` | 健康检查 + 归档队列（始终公开） |
 | GET | `/api/sources` | 来源列表 |
 | GET | `/api/notices` | 查询通知：`source` `category` `since` `q` `limit` `offset` |

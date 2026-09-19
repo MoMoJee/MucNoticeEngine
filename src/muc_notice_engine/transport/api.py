@@ -14,7 +14,13 @@ import zipfile
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from pydantic import BaseModel, Field
 
 from ..config import Settings
@@ -25,6 +31,7 @@ from ..core.fetcher import CHINA_TZ, MucRssService
 from ..core.models import Notice
 from ..core.rendering import render_notices
 from ..core.sources import SOURCES
+from .llm_txt import llm_txt as render_llm_txt
 from .publishers import SubscriberStore
 
 logger = logging.getLogger(__name__)
@@ -83,16 +90,28 @@ def create_app(
 
     @app.get("/")
     async def index() -> HTMLResponse:
-        """首页引导：接口文档在 /docs（Swagger UI）。"""
+        """首页引导：Agent/自动化调用方先读 /llms.txt；接口文档在 /docs。"""
         return HTMLResponse(
             "<!doctype html><meta charset='utf-8'>"
             "<title>MucNoticeEngine</title>"
             "<h1>MucNoticeEngine</h1>"
             "<p>中央民族大学多站点通知聚合 / 存储 / 去重引擎</p>"
+            "<div style='border:1px solid #d0d7de;background:#f6f8fa;"
+            "padding:10px 14px;max-width:820px'>"
+            "<strong>Agent / 自动化调用方注意：</strong>"
+            "不了解站点规则时，<strong>首次调用前必须先读 "
+            "<a href='/llms.txt'>/llms.txt</a></strong>（Agent 入口索引），"
+            "再按其中指引阅读 "
+            "<a href='https://github.com/MoMoJee/MucNoticeEngine/blob/master/"
+            "docs/guides/rest-api.md'>接口语义文档</a>；"
+            "机器可读 schema 见 <a href='/openapi.json'>/openapi.json</a>、"
+            "交互文档 <a href='/docs'>/docs</a>。不要凭猜测拼参数。"
+            "</div>"
             "<ul>"
             "<li><a href='/docs'>API 文档（Swagger UI）</a></li>"
             "<li><a href='/redoc'>API 文档（ReDoc）</a></li>"
             "<li><a href='/openapi.json'>OpenAPI schema</a></li>"
+            "<li><a href='/llms.txt'>Agent 入口索引（llms.txt）</a></li>"
             "<li><a href='/health'>健康检查</a></li>"
             "<li><a href='/api/notices'>通知列表</a></li>"
             "<li><a href='/api/sources'>来源列表</a></li>"
@@ -100,6 +119,17 @@ def create_app(
             "</ul>"
             "<p>使用语义与历史回填见仓库 <code>docs/guides/rest-api.md</code>。</p>"
         )
+
+    @app.get("/llms.txt")
+    async def llms_txt() -> PlainTextResponse:
+        """Agent 入口索引（llmstxt.org 约定），只指路不复制文档。"""
+        return PlainTextResponse(
+            render_llm_txt(), media_type="text/plain; charset=utf-8"
+        )
+
+    @app.get("/llm.txt", include_in_schema=False)
+    async def llm_txt_alias() -> RedirectResponse:
+        return RedirectResponse(url="/llms.txt", status_code=301)
 
     @app.get("/health")
     async def health() -> dict:
