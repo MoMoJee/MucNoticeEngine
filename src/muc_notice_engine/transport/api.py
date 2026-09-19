@@ -96,6 +96,7 @@ def create_app(
             "<li><a href='/health'>健康检查</a></li>"
             "<li><a href='/api/notices'>通知列表</a></li>"
             "<li><a href='/api/sources'>来源列表</a></li>"
+            "<li><a href='/api/search/sites'>可检索站点目录（AOP 智能搜索）</a></li>"
             "</ul>"
             "<p>使用语义与历史回填见仓库 <code>docs/guides/rest-api.md</code>。</p>"
         )

@@ -18,7 +18,7 @@
   - `AopSearchClient.search`：分页（单页 100、扫描上限默认 200）、`//` 协议相对 URL 规范化、
     高亮标签剥离、`YYYY-MM-DD` 日期解析、按链接去重、`exclude` 本地过滤、失败降级为 `error`。
 - transport/api.py：新增 `GET /api/search/sites`、`GET /api/search`；未知站点 404、
-  非法参数 422；沿用 `api_token` 认证。
+  非法参数 422；沿用 `api_token` 认证；引导页 `/` 增加可检索站点目录入口。
 - cli.py：新增 `search` 子命令；不带 `--site` 时列出可检索站点。
 - 配置：无（搜索主机为 `core/aop.py` 常量）。
 - 数据/schema：无（不写库、不入 RSS、不触发 webhook）。
@@ -29,7 +29,7 @@
 ## Verification
 
 - `uv run ruff check .` -> All checks passed
-- `uv run pytest -q` -> 60 passed（新增 tests/test_aop.py 与 API 用例）
+- `uv run pytest -q` -> 60 passed（新增 tests/test_aop.py 与 API 用例；引导页含新入口断言）
 - `uv run muc-notice-engine search` -> 共 34 个可检索站点
 - `uv run muc-notice-engine search --site xingong --keyword 推免 --match all --exclude 名单 --limit 5`
   -> 共 5 条（远端 26 条，扫描 9 条，结果被截断）；结果中无「名单」类条目

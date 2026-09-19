@@ -80,8 +80,10 @@ curl 'http://127.0.0.1:8080/api/notices?q=%E6%99%BA%E6%85%A7%E6%A0%A1%E5%9B%AD'
 curl 'http://127.0.0.1:8080/api/search?site=xingong&q=%E6%8E%A8%E5%85%8D&match=all&exclude=%E5%90%8D%E5%8D%95'
 ```
 
-- 响应里 `remote_total` 是远端命中总数，`count` 是本地过滤/截断后实际返回数；
+- 响应里 `remote_total` 是远端命中总数，`count` 是本地过滤/截断后实际返回数，
+  `scanned` 是实际扫描的远端条数（含去重/排除前的记录）；
   `truncated=true` 表示扫描到上限（默认 200 条）仍未凑满 `limit`。
+- 远端调用失败时 HTTP 仍为 200，但 `error` 非空、`hits` 可能为空/部分，按可降级处理。
 - **不写库**：不新增通知、不入 RSS、不触发 webhook；需要沉淀时用公开源或 `POST /api/check` 回填。
 - 站点高级搜索的「不包含」语法在远端不可靠，故由 `exclude` 本地实现；每次最多扫描
   200 条、页间约 0.2s 间隔，避免给对方站点压力。
