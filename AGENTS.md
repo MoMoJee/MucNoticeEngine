@@ -37,7 +37,7 @@ uv run pytest tests/test_storage.py::test_upsert_is_deduplicating   # 跑单个�
 | 抓取/日期解析 | `core/fetcher.py` | — |
 | 去重/查询/存储字段 | `core/storage.py` | `docs/guides/rest-api.md`（查询语义） |
 | 搜索/归档/回填语义 | `core/engine.py` / `core/archive.py` | `docs/guides/rest-api.md` + `docs/architecture.md` |
-| REST 接口/参数 | `transport/api.py` | `docs/guides/rest-api.md` + `README.md` 接口表 + `transport/llm_txt.py`（`/llms.txt`） |
+| REST 接口/参数 | `transport/api.py` + `transport/schemas.py` | `docs/guides/rest-api.md` + `README.md` 接口表 + `transport/llm_txt.py`（`/llms.txt`） |
 | 远程检索/站点目录（AOP） | `core/aop.py` | `docs/reference/aop-search.md` + `docs/guides/rest-api.md` |
 | webhook 负载/签名 | `transport/publishers.py` | `README.md` |
 | 配置项 | `config.py` + `config.example.toml` + `.env.example` | `docs/guides/rest-api.md`（影响使用时） |
@@ -53,7 +53,9 @@ uv run pytest tests/test_storage.py::test_upsert_is_deduplicating   # 跑单个�
 3. 提交信息格式与参考样例见 `docs/conventions/git.md`（以首次提交为基准）。
 4. 文档同步（按 [conventions/docs.md 同步矩阵](docs/conventions/docs.md#代码变更--文档同步矩阵)）：
    - 接口/参数/使用语义变化 → `docs/guides/rest-api.md` + `README.md` 接口表；
-   - 接口或文档路径变化 → 同步 `/llms.txt`（`transport/llm_txt.py`，Agent 入口，与接口文档同级）；
+   - 接口响应结构 → `transport/schemas.py`（JSON 接口必须带 `response_model` 与错误响应）；
+   - 接口或文档路径变化 → 同步 `/llms.txt`（`transport/llm_txt.py`）与 `/llm/*.md` 白名单
+     （`transport/llm_docs.py`，Agent 入口，与接口文档同级）；
    - 模块边界/数据流变化 → `docs/architecture.md`；
    - 新增文档 → 登记到 `docs/index.md`。
 

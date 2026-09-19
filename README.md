@@ -45,6 +45,7 @@ uv run muc-notice-engine run            # 启动服务（默认 http://127.0.0.1
 | --- | --- | --- |
 | GET | `/` | 引导页（链接到 `/docs` 与 `/llms.txt`） |
 | GET | `/llms.txt` | Agent 入口索引（`/llm.txt` 301 跳转） |
+| GET | `/llm/{name}.md` | 服务自托管的语义文档（rest-api / aop-search / portal-notice-types / index） |
 | GET | `/health` | 健康检查 + 归档队列（始终公开） |
 | GET | `/api/sources` | 来源列表 |
 | GET | `/api/notices` | 查询通知：`source` `category` `since` `q` `limit` `offset` |

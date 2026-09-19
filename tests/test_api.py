@@ -105,6 +105,41 @@ def test_llms_txt_endpoints(tmp_path):
     assert "docs/guides/rest-api.md" in alias.text
 
 
+def test_hosted_docs_endpoints(tmp_path):
+    client = _client(tmp_path)
+
+    rest_api = client.get("/llm/rest-api.md")
+    assert rest_api.status_code == 200
+    assert rest_api.headers["content-type"].startswith("text/markdown")
+    assert "远程检索" in rest_api.text
+
+    aop = client.get("/llm/aop-search.md")
+    assert aop.status_code == 200
+    assert "queryPage" in aop.text
+
+    assert client.get("/llm/not-exist.md").status_code == 404
+    assert "/llm/rest-api.md" in client.get("/llms.txt").text
+    assert "/llm/aop-search.md" in client.get("/llms.txt").text
+
+
+def test_openapi_documents_response_models(tmp_path):
+    schema = _client(tmp_path).get("/openapi.json").json()
+    components = schema["components"]["schemas"]
+    for name in ("NoticeOut", "NoticeListOut", "SearchResultOut", "ErrorOut", "HealthOut"):
+        assert name in components
+
+    notices = schema["paths"]["/api/notices"]["get"]["responses"]["200"]
+    assert notices["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/NoticeListOut"
+    )
+    search = schema["paths"]["/api/search"]["get"]["responses"]["200"]
+    assert search["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/SearchResultOut"
+    )
+    assert "404" in schema["paths"]["/api/notices/{notice_id}"]["get"]["responses"]
+    assert "409" in schema["paths"]["/api/notices/{notice_id}/archive"]["post"]["responses"]
+
+
 def test_rss_endpoint_declares_utf8_charset(tmp_path):
     settings = Settings(data_dir=tmp_path, db_path=tmp_path / "t.db")
     settings.rss_file_path.write_bytes(

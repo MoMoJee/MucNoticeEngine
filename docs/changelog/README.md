@@ -21,6 +21,7 @@
 | [0008](0008-lxy-xingong-sources.md) | 理学院 / 信息工程学院公开来源接入 | feat |
 | [0009](0009-aop-search-api.md) | AOP 智能搜索接口（远程检索） | feat |
 | [0010](0010-agent-entry-llms-txt.md) | Agent 入口：/llms.txt 与首页引导 | feat |
+| [0011](0011-openapi-and-hosted-docs.md) | OpenAPI 补全与服务自托管文档 | feat |
 
 ## 模板
 

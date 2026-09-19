@@ -46,6 +46,9 @@ src/muc_notice_engine/
 │   └── rendering.py     # 可选：matplotlib 卡片图
 └── transport/           # 传输层（可 import core，反向禁止）
     ├── api.py           # FastAPI 路由
+    ├── schemas.py       # OpenAPI 响应模型（response_model）
+    ├── llm_txt.py       # /llms.txt Agent 入口索引
+    ├── llm_docs.py      # /llm/*.md 自托管语义文档白名单
     └── publishers.py    # WebhookPublisher + 订阅者存储
 
 reference/astrbot_plugin_MUC_Notices/   # 只读参考副本，不要修改
@@ -71,7 +74,8 @@ tests/                                  # pytest
 
 1. **先计划后实现**：功能开发前先在 `docs/plans/` 建计划，见 [plans/README.md](plans/README.md)。
 2. **交付必写变更日志**：每次交付在 `docs/changelog/` 建条目，见 [changelog/README.md](changelog/README.md)。
-3. **Agent 入口同步**：接口/参数/文档路径变化时同步 `/llms.txt`（`transport/llm_txt.py`），
+3. **Agent 可读性**：JSON 接口必须带 `response_model`（`transport/schemas.py`）与错误响应声明；
+   接口/文档路径变化时同步 `/llms.txt` 与 `/llm/*.md`（`transport/llm_docs.py` 白名单），
    规则见 [conventions/docs.md](conventions/docs.md)。
 4. **只写可验证内容**：命令必须能直接复制运行；与代码冲突时以代码/`config.example.toml` 为准。
 5. **不重复叙述**：能从代码或配置看出的，不搬到文档里；文档只解释「为什么」和「怎么用」。

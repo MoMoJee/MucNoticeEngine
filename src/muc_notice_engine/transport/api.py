@@ -12,6 +12,7 @@ import os
 import tempfile
 import zipfile
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import (
@@ -31,8 +32,24 @@ from ..core.fetcher import CHINA_TZ, MucRssService
 from ..core.models import Notice
 from ..core.rendering import render_notices
 from ..core.sources import SOURCES
+from .llm_docs import load_doc
 from .llm_txt import llm_txt as render_llm_txt
 from .publishers import SubscriberStore
+from .schemas import (
+    ArchiveQueuedOut,
+    CheckOut,
+    ErrorOut,
+    HealthOut,
+    NoticeFilesOut,
+    NoticeListOut,
+    NoticeOut,
+    SearchResultOut,
+    SearchSitesOut,
+    SourceOut,
+    StatsOut,
+    SubscriberOut,
+    SubscriberRemovedOut,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +97,11 @@ def create_app(
 
     auth = Depends(require_token)
 
+    # 常见错误响应（写进 OpenAPI，供 Agent 直接消费）
+    err_404 = {404: {"model": ErrorOut, "description": "资源不存在"}}
+    err_409 = {409: {"model": ErrorOut, "description": "功能未启用（如归档关闭）"}}
+    err_501 = {501: {"model": ErrorOut, "description": "可选依赖缺失（如 matplotlib）"}}
+
     def archived_path(notice: Notice, filename: str):
         if archive_store is None:
             return None
@@ -88,7 +110,7 @@ def create_app(
 
     # ---------------- 基础 ----------------
 
-    @app.get("/")
+    @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
         """首页引导：Agent/自动化调用方先读 /llms.txt；接口文档在 /docs。"""
         return HTMLResponse(
@@ -120,7 +142,7 @@ def create_app(
             "<p>使用语义与历史回填见仓库 <code>docs/guides/rest-api.md</code>。</p>"
         )
 
-    @app.get("/llms.txt")
+    @app.get("/llms.txt", response_class=PlainTextResponse)
     async def llms_txt() -> PlainTextResponse:
         """Agent 入口索引（llmstxt.org 约定），只指路不复制文档。"""
         return PlainTextResponse(
@@ -131,7 +153,15 @@ def create_app(
     async def llm_txt_alias() -> RedirectResponse:
         return RedirectResponse(url="/llms.txt", status_code=301)
 
-    @app.get("/health")
+    @app.get("/llm/{doc_name}", response_class=PlainTextResponse)
+    async def llm_doc(doc_name: str) -> PlainTextResponse:
+        """服务自托管的语义文档（markdown 原文，白名单见 transport/llm_docs.py）。"""
+        text = load_doc(doc_name)
+        if text is None:
+            raise HTTPException(status_code=404, detail=f"unknown doc: {doc_name}")
+        return PlainTextResponse(text, media_type="text/markdown; charset=utf-8")
+
+    @app.get("/health", response_model=HealthOut)
     async def health() -> dict:
         payload = {
             "status": "ok",
@@ -151,7 +181,7 @@ def create_app(
             }
         return payload
 
-    @app.get("/api/sources", dependencies=[auth])
+    @app.get("/api/sources", dependencies=[auth], response_model=list[SourceOut])
     async def list_sources() -> list[dict]:
         return [
             {
@@ -166,14 +196,20 @@ def create_app(
 
     # ---------------- 通知查询 ----------------
 
-    @app.get("/api/notices", dependencies=[auth])
+    @app.get("/api/notices", dependencies=[auth], response_model=NoticeListOut)
     async def list_notices(
         source: str | None = Query(None, description="逗号分隔的 source_key"),
-        category: str | None = None,
-        since: datetime | None = None,
+        category: Annotated[
+            str | None,
+            Query(description="按来源分类过滤（如 graduate、muc、lxy、xingong）"),
+        ] = None,
+        since: Annotated[
+            datetime | None,
+            Query(description="published_at >= since（ISO 8601，含时区）"),
+        ] = None,
         q: str | None = Query(None, description="关键词，匹配标题/摘要/正文预览"),
-        limit: int = Query(50, ge=1, le=500),
-        offset: int = Query(0, ge=0),
+        limit: int = Query(50, ge=1, le=500, description="最多返回条数"),
+        offset: int = Query(0, ge=0, description="跳过条数，配合 limit 翻页"),
     ) -> dict:
         source_keys = [s.strip() for s in source.split(",") if s.strip()] if source else None
         notices: list[Notice] = await store.query(
@@ -189,7 +225,12 @@ def create_app(
             "items": [n.to_dict() for n in notices],
         }
 
-    @app.get("/api/notices/{notice_id}", dependencies=[auth])
+    @app.get(
+        "/api/notices/{notice_id}",
+        dependencies=[auth],
+        response_model=NoticeOut,
+        responses=err_404,
+    )
     async def get_notice(notice_id: str) -> dict:
         notice = await store.get(notice_id)
         if notice is None:
@@ -199,7 +240,19 @@ def create_app(
 
     # ---------------- 正文 / 附件 ----------------
 
-    @app.get("/api/notices/{notice_id}/content", dependencies=[auth])
+    @app.get(
+        "/api/notices/{notice_id}/content",
+        dependencies=[auth],
+        response_class=HTMLResponse,
+        responses={
+            200: {
+                "description": "已归档返回原文；未归档返回 2000 字预览，"
+                "响应头 X-Muc-Content: preview",
+                "content": {"text/html": {}},
+            },
+            **err_404,
+        },
+    )
     async def get_notice_content(notice_id: str):
         notice = await store.get(notice_id)
         if notice is None:
@@ -221,7 +274,17 @@ def create_app(
             )
         raise HTTPException(status_code=404, detail="content not archived yet")
 
-    @app.get("/api/notices/{notice_id}/content.zip", dependencies=[auth])
+    @app.get(
+        "/api/notices/{notice_id}/content.zip",
+        dependencies=[auth],
+        responses={
+            200: {
+                "description": "content.html / content.txt / meta.json / files/ 打包",
+                "content": {"application/zip": {}},
+            },
+            **err_404,
+        },
+    )
     async def get_notice_content_zip(notice_id: str):
         notice = await store.get(notice_id)
         if notice is None:
@@ -259,8 +322,14 @@ def create_app(
         name = safe_filename(f"{notice.external_id or notice.id}.zip", "notice.zip")
         return FileResponse(tmp_path, media_type="application/zip", filename=name)
 
-    @app.get("/api/notices/{notice_id}/files", dependencies=[auth])
+    @app.get(
+        "/api/notices/{notice_id}/files",
+        dependencies=[auth],
+        response_model=NoticeFilesOut,
+        responses=err_404,
+    )
     async def list_notice_files(notice_id: str, name: str | None = None):
+        """不带 `name` 返回落盘文件清单；带 `name` 直接下载该文件。"""
         notice = await store.get(notice_id)
         if notice is None:
             raise HTTPException(status_code=404, detail="notice not found")
@@ -296,7 +365,13 @@ def create_app(
             ],
         }
 
-    @app.post("/api/notices/{notice_id}/archive", dependencies=[auth], status_code=202)
+    @app.post(
+        "/api/notices/{notice_id}/archive",
+        dependencies=[auth],
+        status_code=202,
+        response_model=ArchiveQueuedOut,
+        responses={**err_404, **err_409},
+    )
     async def archive_notice(notice_id: str) -> dict:
         notice = await store.get(notice_id)
         if notice is None:
@@ -306,17 +381,24 @@ def create_app(
         await engine.archiver.enqueue(notice, force=True)
         return {"queued": notice_id}
 
-    @app.get("/api/stats", dependencies=[auth])
+    @app.get("/api/stats", dependencies=[auth], response_model=StatsOut)
     async def stats() -> dict:
         return {"sources": await store.stats()}
 
     # ---------------- 远程检索（AOP 智能搜索，不写库） ----------------
 
-    @app.get("/api/search/sites", dependencies=[auth])
+    @app.get(
+        "/api/search/sites", dependencies=[auth], response_model=SearchSitesOut
+    )
     async def search_sites() -> dict:
         return {"count": len(AOP_SITES), "sites": [site.to_dict() for site in AOP_SITES]}
 
-    @app.get("/api/search", dependencies=[auth])
+    @app.get(
+        "/api/search",
+        dependencies=[auth],
+        response_model=SearchResultOut,
+        responses=err_404,
+    )
     async def remote_search(
         site: str = Query(..., description="站点 key（也接受 owner/host/名称），见 /api/search/sites"),
         q: str = Query(..., min_length=1, description="关键词，空格分隔"),
@@ -326,8 +408,9 @@ def create_app(
         order: str = Query("date", pattern="^(date|score)$", description="date=按时间，score=按相关度"),
         since: str | None = Query(None, description="起始日期 YYYY-MM-DD"),
         until: str | None = Query(None, description="截止日期 YYYY-MM-DD"),
-        limit: int = Query(20, ge=1, le=100),
+        limit: int = Query(20, ge=1, le=100, description="返回条数（最多扫描 200 条）"),
     ) -> dict:
+        """远程全文检索：只读、不写库；`exclude` 为本地过滤。"""
         target = resolve_site(site)
         if target is None:
             raise HTTPException(status_code=404, detail=f"unknown site: {site}")
@@ -359,9 +442,14 @@ def create_app(
 
     # ---------------- 触发抓取 ----------------
 
-    @app.post("/api/check", dependencies=[auth])
+    @app.post(
+        "/api/check",
+        dependencies=[auth],
+        response_model=CheckOut,
+        response_model_exclude_none=True,
+    )
     async def check_now(body: CheckIn | None = None) -> dict:
-        """立即抓取。给了 `type` 就按门户历史（页数区间/关键词）抓取并视为回填。"""
+        """立即抓取。给了 `type` 就按门户历史（页数区间/关键词）抓取并视为回填；回填默认不推送。"""
         if body is not None and body.type is not None:
             from_page = max(1, body.from_page)
             to_page = max(from_page, body.to_page)
@@ -389,7 +477,18 @@ def create_app(
 
     # ---------------- 卡片渲染（可选）----------------
 
-    @app.get("/api/card.png", dependencies=[auth])
+    @app.get(
+        "/api/card.png",
+        dependencies=[auth],
+        responses={
+            200: {
+                "description": "最近通知 PNG 卡片（需安装 [render] 可选依赖）",
+                "content": {"image/png": {}},
+            },
+            **err_404,
+            **err_501,
+        },
+    )
     async def card(
         source: str | None = None,
         limit: int = Query(5, ge=1, le=10),
@@ -408,7 +507,14 @@ def create_app(
 
     # ---------------- RSS ----------------
 
-    @app.get("/api/rss", dependencies=[auth])
+    @app.get(
+        "/api/rss",
+        dependencies=[auth],
+        responses={
+            200: {"description": "RSS 2.0 文件", "content": {"application/rss+xml": {}}},
+            **err_404,
+        },
+    )
     async def rss():
         path = settings.rss_file_path
         if not path.is_file():
@@ -417,17 +523,27 @@ def create_app(
 
     # ---------------- Webhook 订阅管理 ----------------
 
-    @app.get("/api/subscribers", dependencies=[auth])
+    @app.get("/api/subscribers", dependencies=[auth], response_model=list[SubscriberOut])
     async def list_subscribers() -> list[dict]:
         return await subscribers.list()
 
-    @app.post("/api/subscribers", dependencies=[auth], status_code=201)
+    @app.post(
+        "/api/subscribers",
+        dependencies=[auth],
+        status_code=201,
+        response_model=SubscriberOut,
+    )
     async def add_subscriber(body: SubscriberIn) -> dict:
         if not body.url.startswith(("http://", "https://")):
             raise HTTPException(status_code=422, detail="url must be http(s)")
         return await subscribers.add(body.url, body.secret, body.source_keys)
 
-    @app.delete("/api/subscribers/{subscriber_id}", dependencies=[auth])
+    @app.delete(
+        "/api/subscribers/{subscriber_id}",
+        dependencies=[auth],
+        response_model=SubscriberRemovedOut,
+        responses=err_404,
+    )
     async def remove_subscriber(subscriber_id: str) -> JSONResponse:
         removed = await subscribers.remove(subscriber_id)
         if not removed:

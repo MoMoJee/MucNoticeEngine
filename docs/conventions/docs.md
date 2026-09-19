@@ -35,6 +35,18 @@
 - **必须随开发同步**：接口路径、参数上限、认证规则、文档路径变化时一起更新；
   提交前对照上方清单检查。
 
+## OpenAPI 与自托管文档
+
+- `/docs`、`/redoc`、`/openapi.json` 是 FastAPI 生成的**同一份** schema，改一处三处同时变。
+- JSON 接口必须写 `response_model`（模型集中在 `transport/schemas.py`），
+  错误响应用 `transport/api.py` 里的 `err_404/err_409/err_501` 声明；
+  否则响应会退化成 `{additionalProperties: true}`，Agent 无法消费。
+- 语义规则（跨接口行为、限制、回填/归档说明）写在 markdown，不塞进 schema；
+  由服务自托管：`GET /llm/{name}.md`，白名单在 `transport/llm_docs.py`。
+- 新增可托管文档时：登记 `HOSTED_DOCS`，并在 `/llms.txt` 的「其他」中列出。
+- `/llms.txt` 首选指向自托管路径（`/llm/rest-api.md`、`/llm/aop-search.md`），
+  GitHub 链接只作服务不可用时的兜底。
+
 ## 计划（plan）规范
 
 - 位置：`docs/plans/NNNN-kebab-topic.md`，模板见 [plans/README.md](../plans/README.md)。
@@ -57,7 +69,8 @@
 
 | 代码变更 | 必须同步 |
 | --- | --- |
-| REST 路径 / 参数 / 响应结构 | `docs/guides/rest-api.md` + `README.md` 接口表 + `transport/llm_txt.py`（`/llms.txt`） |
+| REST 路径 / 参数 / 响应结构 | `transport/schemas.py` + `docs/guides/rest-api.md` + `README.md` 接口表 + `transport/llm_txt.py`（`/llms.txt`） |
+| 新增/删除自托管文档 | `transport/llm_docs.py` 白名单 + `transport/llm_txt.py` + `docs/index.md` |
 | 查询 / 搜索 / 分页 / 排序语义 | `docs/guides/rest-api.md` + `transport/llm_txt.py`（`/llms.txt` 摘要） |
 | 归档 / 淘汰 / 回填 / 时间窗语义 | `docs/guides/rest-api.md` + `docs/architecture.md` |
 | 新增配置项或默认值变化 | `config.example.toml` + `.env.example` + `docs/guides/rest-api.md`（影响使用时） |
@@ -71,6 +84,8 @@
 - [ ] 新增/删除文档是否更新了 `docs/index.md`？
 - [ ] 按上方「同步矩阵」检查了本次改动涉及的指导文档？
 - [ ] 接口路径/参数/上限或文档路径有变化时，是否同步了 `/llms.txt`（`transport/llm_txt.py`）？
+- [ ] 新增/修改 JSON 接口是否补了 `response_model`（`transport/schemas.py`）与错误响应声明？
+- [ ] 新增可托管文档是否登记了 `transport/llm_docs.py` 白名单？
 - [ ] `README.md` 的接口表/特性数字是否仍然正确？
 - [ ] 改动了 `core`/`transport` 边界，是否更新了 `architecture.md`？
 - [ ] 新增配置项，是否同步了 `config.example.toml` / `.env.example`？

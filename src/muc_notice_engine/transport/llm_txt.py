@@ -22,12 +22,14 @@ def llm_txt() -> str:
 ## 首次调用前必读（按顺序）
 
 1. 接口语义与参数（权威，别猜参数）：
-   {DOCS_BASE}/docs/guides/rest-api.md
-   仓库内路径：docs/guides/rest-api.md
-2. 机器可读 schema：GET /openapi.json （交互文档：GET /docs）
+   GET /llm/rest-api.md（服务自托管 markdown；仓库路径 docs/guides/rest-api.md）
+2. 机器可读 schema：GET /openapi.json （交互文档：GET /docs、GET /redoc）
 3. 远程检索规则（用 /api/search 前必读）：
-   {DOCS_BASE}/docs/reference/aop-search.md
-   仓库内路径：docs/reference/aop-search.md
+   GET /llm/aop-search.md（仓库路径 docs/reference/aop-search.md）
+
+> 文档由本服务托管（`/llm/*.md`），Agent 不依赖 GitHub 也能读。
+> 仅在服务不可用时用 GitHub 兜底：{DOCS_BASE}/docs/guides/rest-api.md
+> 可选托管文档：/llm/index.md、/llm/portal-notice-types.md。
 
 ## 按任务查
 
@@ -52,6 +54,7 @@ def llm_txt() -> str:
 
 ## 其他
 
+- 文档托管：GET /llm/index.md、/llm/rest-api.md、/llm/aop-search.md、/llm/portal-notice-types.md
 - 项目主页：{REPO_URL}
 - 变更记录：{DOCS_BASE}/docs/changelog
 """
