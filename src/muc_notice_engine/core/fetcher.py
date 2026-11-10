@@ -7,15 +7,19 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import json
 import logging
 import re
+import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from hashlib import sha1
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -68,12 +72,159 @@ ARTICLE_SELECTORS = (
 # onclick="opennews('...')" / onclick='opennews("...")' 里的首个引号字符串。
 ONCLICK_URL_PATTERN = re.compile(r"""['"]([^'"]+)['"]""")
 
+# 正文图片：微信等站点用懒加载属性承载真实地址。
+IMAGE_SOURCE_ATTRS = ("data-src", "data-original", "data-lazy-src", "src")
+ATTACHMENT_SUFFIXES = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+    ".ppt", ".pptx", ".zip", ".rar", ".7z", ".txt", ".csv",
+}
+# lib.muc.edu.cn/engine2 详情页把正文放在 `data: {"content": "..."}` 里。
+EMBEDDED_DATA_PATTERN = re.compile(r"[\"']?data[\"']?\s*[:=]\s*\{")
+EMBEDDED_CONTENT_PATTERN = re.compile(r"[\"']content[\"']\s*:\s*")
+
 
 def _as_int(value: Any) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _is_http_url(value: str) -> bool:
+    return value.startswith(("http://", "https://"))
+
+
+def _is_safe_public_url(url: str) -> bool:
+    """只允许公网 http(s) 地址，避免被外链引到回环/内网。"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host == "localhost" or host.endswith((".local", ".internal")):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _normalize_external_url(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    url = raw if _is_http_url(raw) else urljoin(PORTAL_BASE_URL, raw)
+    return url if _is_http_url(url) else ""
+
+
+def _pick_image_source(tag: Tag) -> str:
+    for attr in IMAGE_SOURCE_ATTRS:
+        value = str(tag.get(attr) or "").strip()
+        if value and not value.lower().startswith(("data:", "javascript:", "#")):
+            return value
+    return ""
+
+
+def _url_filename(url: str, fallback: str) -> str:
+    name = Path(urlparse(url).path).name
+    if name and "." in name:
+        return name
+    query = parse_qs(urlparse(url).query)
+    fmt = str((query.get("wx_fmt") or query.get("format") or [""])[0]).strip()
+    if fmt:
+        stem = Path(name).stem if name else fallback
+        return f"{stem}.{fmt}"
+    return fallback
+
+
+def _attachment_suffix(url: str) -> str:
+    return Path(urlparse(url).path).suffix.lower()
+
+
+def _balanced_json(text: str, start: int) -> str:
+    """从 `{` 起截取配平的 JSON 对象（忽略字符串内的括号）。"""
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""
+
+
+def _extract_embedded_content(html: str) -> str:
+    """从页面内嵌脚本的 `data` 对象里取 HTML 正文。"""
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.find_all("script"):
+        text = script.string or script.get_text() or ""
+        if "content" not in text:
+            continue
+        for match in EMBEDDED_DATA_PATTERN.finditer(text):
+            start = text.find("{", match.start())
+            candidate = _balanced_json(text, start)
+            if not candidate:
+                continue
+            try:
+                data = json.loads(candidate)
+            except (TypeError, ValueError):
+                continue
+            content = data.get("content") if isinstance(data, dict) else None
+            if isinstance(content, str) and content.strip():
+                return content
+        for match in EMBEDDED_CONTENT_PATTERN.finditer(text):
+            try:
+                value, _ = json.JSONDecoder().raw_decode(
+                    text[match.end() :].lstrip()
+                )
+            except ValueError:
+                continue
+            if isinstance(value, str) and value.strip():
+                return value
+    return ""
+
+
+class HostRateLimiter:
+    """同一域名串行请求，并保证最小请求间隔。"""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._last_at: dict[str, float] = {}
+
+    @asynccontextmanager
+    async def slot(self, url: str, interval_ms: int = 0):
+        host = (urlparse(url).hostname or "").lower()
+        lock = self._locks.setdefault(host, asyncio.Lock())
+        async with lock:
+            interval = max(0, interval_ms) / 1000
+            wait = self._last_at.get(host, 0.0) + interval - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            try:
+                yield
+            finally:
+                self._last_at[host] = time.monotonic()
 
 
 class SessionInvalidError(Exception):
@@ -87,6 +238,7 @@ class MucRssService:
         self.settings = settings
         self._auth_service = auth_service
         self._semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
+        self._host_limiter = HostRateLimiter()
 
     @property
     def rss_file_path(self):
@@ -427,7 +579,8 @@ class MucRssService:
         if not title:
             return None
         notice_id = str(item.get("notice_id", ""))
-        link = (
+        external_link = _normalize_external_url(item.get("notice_link"))
+        link = external_link or (
             "https://my.muc.edu.cn/page/11#/print?"
             f"type={type_id}&notice_id={notice_id}&show_type=1"
         )
@@ -492,13 +645,31 @@ class MucRssService:
             payload = resp.json()
             info = (payload.get("datas") or {}).get("notice_info") or {}
             content_html = str(info.get("notice_content") or "")
+            attachments = self._parse_portal_attachments(notice, info, content_html)
+            plain_text = _html_to_text(content_html)
+            if not content_html.strip():
+                external_url = _normalize_external_url(info.get("notice_link"))
+                if external_url:
+                    external = await self._fetch_remote_detail(
+                        notice, external_url, stage="正文"
+                    )
+                    if external is not None:
+                        content_html = external.content_html
+                        plain_text = external.plain_text or plain_text
+                        attachments = self._merge_attachments(
+                            attachments, external.attachments
+                        )
+                    else:
+                        logger.info(
+                            "[RSS] 外链正文抓取失败 source=%s url=%s",
+                            notice.source_key,
+                            external_url,
+                        )
             return NoticeDetail(
                 notice=notice,
                 content_html=content_html,
-                attachments=self._parse_portal_attachments(
-                    notice, info, content_html
-                ),
-                plain_text=_html_to_text(content_html),
+                attachments=attachments,
+                plain_text=plain_text,
             )
 
         try:
@@ -540,51 +711,188 @@ class MucRssService:
         seen: set[str] = set()
         soup = BeautifulSoup(content_html, "html.parser")
         for idx, img in enumerate(soup.find_all("img")):
-            src = str(img.get("src") or "").strip()
+            src = _pick_image_source(img)
             if not src:
                 continue
             url = urljoin(PORTAL_BASE_URL, src)
-            if not url.startswith(("http://", "https://")) or url in seen:
+            if not _is_http_url(url) or not _is_safe_public_url(url) or url in seen:
                 continue
             seen.add(url)
-            name = Path(urlparse(url).path).name or f"image-{idx}.png"
+            name = _url_filename(url, f"image-{idx}.png")
             attachments.append(
                 Attachment(annex_id="", name=name, url=url, suffix="", kind="image")
             )
         return attachments
 
     async def _fetch_public_detail(self, notice: Notice) -> NoticeDetail | None:
-        if not (notice.link or "").startswith("http"):
+        return await self._fetch_remote_detail(notice, notice.link)
+
+    async def _fetch_remote_detail(
+        self, notice: Notice, url: str, *, stage: str = "正文"
+    ) -> NoticeDetail | None:
+        if not _is_http_url(url) or not _is_safe_public_url(url):
+            logger.info(
+                "[RSS] 拒绝抓取外链 source=%s stage=%s url=%s",
+                notice.source_key,
+                stage,
+                url,
+            )
             return None
         timeout = min(self.settings.request_timeout_seconds, 15)
+        headers = dict(DEFAULT_HEADERS)
+        headers["Referer"] = url
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True, timeout=timeout, headers=DEFAULT_HEADERS
+                follow_redirects=True, timeout=timeout, headers=headers
             ) as client:
-                async with self._semaphore:
-                    resp = await client.get(notice.link)
-                resp.raise_for_status()
+                async with self._host_limiter.slot(
+                    url, self.settings.archive_host_interval_ms
+                ):
+                    resp = await self._get_with_retry(
+                        client, url, source_key=notice.source_key, stage=stage
+                    )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("[RSS] 抓正文失败 %s: %s", notice.link, exc)
+            logger.info(
+                "[RSS] 外链抓取失败 source=%s stage=%s url=%s error=%s",
+                notice.source_key,
+                stage,
+                url,
+                exc,
+            )
             return None
 
-        soup = BeautifulSoup(resp.text, "html.parser")
-        node = None
-        for sel in ARTICLE_SELECTORS:
-            node = soup.select_one(sel)
-            if node:
-                break
-        node = node or soup.body or soup
+        embedded = ""
+        if self._looks_like_engine2(url):
+            embedded = _extract_embedded_content(resp.text)
+        if embedded.strip():
+            soup = BeautifulSoup(embedded, "html.parser")
+            node = soup.body or soup
+        else:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            node = self._select_article_node(soup)
         for bad in node.select("script, style, nav, header, footer"):
             bad.decompose()
         content_html = "".join(str(child) for child in node.children).strip()
+        if not content_html:
+            content_html = node.decode_contents().strip()
         plain = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+        attachments = self._extract_article_assets(node, url)
         return NoticeDetail(
             notice=notice,
             content_html=content_html,
-            attachments=[],
+            attachments=attachments,
             plain_text=plain,
         )
+
+    async def _get_with_retry(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        *,
+        source_key: str,
+        stage: str,
+    ) -> httpx.Response:
+        attempts = max(0, self.settings.archive_external_retries) + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await client.get(url)
+            except Exception as exc:  # noqa: BLE001
+                if attempt >= attempts:
+                    logger.info(
+                        "[EXTERNAL] 抓取失败 source=%s stage=%s url=%s error=%s",
+                        source_key,
+                        stage,
+                        url,
+                        exc,
+                    )
+                    raise
+                await asyncio.sleep(0.5 * attempt)
+                continue
+            status = response.status_code
+            if status < 500 and status != 429:
+                if status >= 400:
+                    logger.info(
+                        "[EXTERNAL] 抓取失败 source=%s stage=%s status=%s url=%s",
+                        source_key,
+                        stage,
+                        status,
+                        url,
+                    )
+                response.raise_for_status()
+                return response
+            if attempt >= attempts:
+                logger.info(
+                    "[EXTERNAL] 抓取失败 source=%s stage=%s status=%s url=%s",
+                    source_key,
+                    stage,
+                    status,
+                    url,
+                )
+                response.raise_for_status()
+            await asyncio.sleep(0.5 * attempt)
+        raise RuntimeError(f"external fetch failed: {url}")
+
+    def _looks_like_engine2(self, url: str) -> bool:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        return host.endswith(".muc.edu.cn") and "engine2" in parsed.path
+
+    def _select_article_node(self, soup: BeautifulSoup) -> Tag:
+        for selector in ARTICLE_SELECTORS:
+            node = soup.select_one(selector)
+            if node:
+                return node
+        return soup.body or soup
+
+    def _extract_article_assets(
+        self, node: Tag, base_url: str
+    ) -> list[Attachment]:
+        attachments: list[Attachment] = []
+        seen: set[str] = set()
+        for idx, img in enumerate(node.find_all("img")):
+            src = _pick_image_source(img)
+            if not src:
+                continue
+            url = urljoin(base_url, src)
+            if not _is_http_url(url) or not _is_safe_public_url(url) or url in seen:
+                continue
+            seen.add(url)
+            name = _url_filename(url, f"image-{idx}.png")
+            attachments.append(
+                Attachment(annex_id="", name=name, url=url, suffix="", kind="image")
+            )
+
+        for idx, link in enumerate(node.find_all("a")):
+            href = str(link.get("href") or "").strip()
+            if not href or href.lower().startswith(("javascript:", "mailto:", "#")):
+                continue
+            url = urljoin(base_url, href)
+            if not _is_http_url(url) or not _is_safe_public_url(url) or url in seen:
+                continue
+            suffix = _attachment_suffix(url)
+            if suffix not in ATTACHMENT_SUFFIXES:
+                continue
+            seen.add(url)
+            name = _url_filename(url, f"attachment-{idx}{suffix}")
+            attachments.append(
+                Attachment(
+                    annex_id="", name=name, url=url, suffix=suffix, kind="file"
+                )
+            )
+        return attachments
+
+    def _merge_attachments(
+        self, *groups: list[Attachment]
+    ) -> list[Attachment]:
+        merged: list[Attachment] = []
+        seen: set[str] = set()
+        for group in groups:
+            for attachment in group:
+                if attachment.url in seen:
+                    continue
+                seen.add(attachment.url)
+                merged.append(attachment)
+        return merged
 
     def _parse_api_time(self, time_val, default: datetime) -> datetime:
         try:

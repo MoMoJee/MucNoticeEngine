@@ -47,6 +47,10 @@ class MyArchiver:
      即二者取**较晚者**，2030 年只归档近 90 天）
      的交给 `Archiver.enqueue()`，后台 `ArchiveQueue` worker 调 `fetch_detail()` 抓正文/附件，
      `ArchiveStore` 落盘并写 `assets` 表；超总量按 `last_access_at` 升序淘汰。
+     门户详情 `notice_content` 为空时，`fetch_detail()` 回落 `notice_link` 抓外站正文：
+     选择器命中优先、`body` 兜底，图片兼容 `data-src` 等懒加载属性，`<a>` 按后缀
+     识别附件；`lib.muc.edu.cn/engine2` 解析内嵌 `data` JSON。外链请求同域串行限速，
+     5xx/网络异常重试一次。
    - 非回填（或 `backfill_push=true`）时经 `push_max_age_days` 过滤后交给所有 `Publisher`。
 5. `WebhookPublisher` 按订阅者的 `source_keys` 过滤后 POST，支持 HMAC-SHA256 签名。
 
@@ -80,6 +84,8 @@ REST 不直接参与推送：查询走 `storage`，手动触发走 `engine.poll_
   跟随跳转后校验。
 - **归档是「暂存」而非备份**：超 `archive_total_limit_gb` 会按最近访问时间淘汰，
   被淘汰的文件只能重新归档（`POST /api/notices/{id}/archive`）。
+- **外链正文不保证长期可访问**：上游删除/权限变更会导致重新归档失败；图片受
+  `archive_max_images_per_notice` 与单文件上限约束，失败只影响该条，不阻塞队列。
 - **不存正文全文到数据库**：DB 只有 2000 字预览，完整正文/附件在 `data/archive/`。
 - **加密降级**：`gmssl` 缺失或加密异常时 `auth._sm2_encrypt` 会退回明文密码并记 warning（兼容优先，非安全最优）。
 - **公开源选择器写死**：学校改版会导致 `选择器未命中` 日志，需要更新 `sources.py`。

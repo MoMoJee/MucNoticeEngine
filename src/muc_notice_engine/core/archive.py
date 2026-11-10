@@ -30,7 +30,7 @@ from bs4 import BeautifulSoup
 
 from ..config import Settings
 from .auth import MucAuthService
-from .fetcher import CHINA_TZ, MucRssService
+from .fetcher import CHINA_TZ, DEFAULT_HEADERS, HostRateLimiter, MucRssService
 from .models import Attachment, Notice, NoticeDetail
 from .storage import NoticeStore
 
@@ -78,6 +78,7 @@ class ArchiveStore:
         self.auth_service = auth_service
         self.root = Path(settings.archive_dir)
         self._last_evict_at = 0.0
+        self._host_limiter = HostRateLimiter()
 
     def notice_dir(self, notice: Notice) -> Path:
         source = safe_filename(notice.source_key, "source")
@@ -101,16 +102,19 @@ class ArchiveStore:
         if text.strip():
             records.append(await self._write_text(target / "content.txt", text, "content"))
 
-        attachments = detail.attachments[: max(0, self.settings.archive_max_per_notice)]
+        attachments = self._limit_attachments(detail.attachments)
         if attachments:
             files_dir = target / "files"
             await asyncio.to_thread(files_dir.mkdir, parents=True, exist_ok=True)
             async with httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=self.settings.request_timeout_seconds,
+                headers=DEFAULT_HEADERS,
             ) as client:
                 for index, attachment in enumerate(attachments, start=1):
-                    record = await self._download(client, attachment, index, files_dir)
+                    record = await self._download(
+                        client, attachment, index, files_dir, notice
+                    )
                     if record is not None:
                         records.append(record)
 
@@ -148,6 +152,24 @@ class ArchiveStore:
         await self.evict_to_limit()
         return records
 
+    def _limit_attachments(self, attachments: list[Attachment]) -> list[Attachment]:
+        """附件与图片分别受各自上限限制，同时保持原始顺序。"""
+        max_files = max(0, self.settings.archive_max_per_notice)
+        max_images = max(0, self.settings.archive_max_images_per_notice)
+        selected: list[Attachment] = []
+        files = images = 0
+        for attachment in attachments:
+            if attachment.kind == "image":
+                if images >= max_images:
+                    continue
+                images += 1
+            else:
+                if files >= max_files:
+                    continue
+                files += 1
+            selected.append(attachment)
+        return selected
+
     async def _write_text(self, path: Path, text: str, kind: str) -> dict:
         data = text.encode("utf-8", errors="replace")
         return await asyncio.to_thread(self._write_bytes_sync, path, data, kind)
@@ -170,6 +192,7 @@ class ArchiveStore:
         attachment: Attachment,
         index: int,
         files_dir: Path,
+        notice: Notice | None = None,
     ) -> dict | None:
         request_client = client
         if self.auth_service is not None and "my.muc.edu.cn" in attachment.url:
@@ -179,45 +202,98 @@ class ArchiveStore:
             request_client = auth_client
 
         size_limit = max(0, self.settings.archive_max_file_mb) * 1024 * 1024
-        try:
-            async with request_client.stream("GET", attachment.url) as response:
-                if response.status_code != 200:
-                    logger.info(
-                        "[ARCHIVE] 下载失败 status=%s %s",
-                        response.status_code,
-                        attachment.name,
-                    )
-                    return None
-                disposition = response.headers.get("content-disposition", "").lower()
-                content_type = response.headers.get("content-type", "").lower()
-                if attachment.kind == "file":
-                    if "filename" not in disposition:
-                        logger.info(
-                            "[ARCHIVE] 非附件响应（可能未登录或被重定向）%s content-type=%s",
-                            attachment.name,
-                            content_type,
-                        )
-                        return None
-                elif not content_type.startswith("image/"):
-                    logger.info(
-                        "[ARCHIVE] 非图片响应 %s content-type=%s",
-                        attachment.name,
-                        content_type,
-                    )
-                    return None
+        attempts = max(0, self.settings.archive_external_retries) + 1
+        source_key = notice.source_key if notice is not None else ""
+        buffer: bytearray | None = None
+        for attempt in range(1, attempts + 1):
+            buffer = None
+            retry = False
+            try:
+                async with self._host_limiter.slot(
+                    attachment.url, self.settings.archive_host_interval_ms
+                ):
+                    async with request_client.stream(
+                        "GET", attachment.url
+                    ) as response:
+                        status = response.status_code
+                        if status != 200:
+                            logger.info(
+                                "[ARCHIVE] 下载失败 source=%s stage=%s status=%s url=%s",
+                                source_key,
+                                attachment.kind,
+                                status,
+                                attachment.url,
+                            )
+                            retry = status >= 500 and attempt < attempts
+                        else:
+                            disposition = response.headers.get(
+                                "content-disposition", ""
+                            ).lower()
+                            content_type = response.headers.get(
+                                "content-type", ""
+                            ).lower()
+                            if attachment.kind == "file":
+                                is_portal = "my.muc.edu.cn" in attachment.url
+                                non_file_type = content_type.startswith(
+                                    (
+                                        "text/html",
+                                        "text/plain",
+                                        "application/xhtml",
+                                        "application/json",
+                                        "application/xml",
+                                    )
+                                )
+                                if is_portal:
+                                    rejected = "filename" not in disposition
+                                else:
+                                    rejected = non_file_type
+                                if rejected:
+                                    logger.info(
+                                        "[ARCHIVE] 非附件响应（可能未登录或被重定向）"
+                                        " source=%s url=%s content-type=%s",
+                                        source_key,
+                                        attachment.url,
+                                        content_type,
+                                    )
+                                    return None
+                            elif not content_type.startswith("image/"):
+                                logger.info(
+                                    "[ARCHIVE] 非图片响应 source=%s url=%s"
+                                    " content-type=%s",
+                                    source_key,
+                                    attachment.url,
+                                    content_type,
+                                )
+                                return None
 
-                buffer = bytearray()
-                async for chunk in response.aiter_bytes():
-                    buffer.extend(chunk)
-                    if size_limit and len(buffer) > size_limit:
-                        logger.warning(
-                            "[ARCHIVE] 超过单文件上限 %s MB，跳过 %s",
-                            self.settings.archive_max_file_mb,
-                            attachment.name,
-                        )
-                        return None
-        except Exception as exc:  # noqa: BLE001
-            logger.info("[ARCHIVE] 下载异常 %s: %s", attachment.name, exc)
+                            buffer = bytearray()
+                            async for chunk in response.aiter_bytes():
+                                buffer.extend(chunk)
+                                if size_limit and len(buffer) > size_limit:
+                                    logger.warning(
+                                        "[ARCHIVE] 超过单文件上限 %s MB，跳过 %s",
+                                        self.settings.archive_max_file_mb,
+                                        attachment.name,
+                                    )
+                                    return None
+            except Exception as exc:  # noqa: BLE001
+                logger.info(
+                    "[ARCHIVE] 下载异常 source=%s stage=%s url=%s error=%s",
+                    source_key,
+                    attachment.kind,
+                    attachment.url,
+                    exc,
+                )
+                buffer = None
+                retry = attempt < attempts
+
+            if buffer is not None:
+                break
+            if not retry:
+                return None
+            await asyncio.sleep(0.5 * attempt)
+
+        if buffer is None:
             return None
 
         base = safe_filename(attachment.name, f"file-{index}")
@@ -358,9 +434,15 @@ class ArchiveQueue:
 
     async def _process(self, notice: Notice, force: bool) -> bool:
         detail = await self.fetcher.fetch_detail(notice)
-        if detail is None or (not detail.content_html and not detail.attachments):
+        if detail is None:
+            logger.info("[ARCHIVE] 详情抓取失败，无可归档内容 %s", notice.id)
+            return False
+        has_content = bool((detail.content_html or "").strip())
+        if not has_content and not detail.attachments:
             logger.info("[ARCHIVE] 无正文可归档 %s", notice.id)
             return False
+        if has_content and not detail.attachments:
+            logger.info("[ARCHIVE] 已归档正文但无图片/附件 %s", notice.id)
         records = await self.archive_store.archive(detail)
         if not (notice.content or "").strip() and detail.plain_text:
             await self.store.fill_content_preview(notice.id, detail.plain_text)

@@ -30,6 +30,11 @@ archive_workers = 2
 archive_enqueue_limit_per_poll = 50
 archive_max_file_mb = 50
 archive_max_per_notice = 50
+# 单篇正文内联图片上限（外链图片同样受限）
+archive_max_images_per_notice = 120
+# 外链正文/图片重试次数（仅 5xx 与网络异常）与同域最小请求间隔
+archive_external_retries = 1
+archive_host_interval_ms = 300
 # 自动归档时间窗：published_at >= max(floor_date, now - window_days)
 archive_window_days = 90
 archive_floor_date = "2026-08-31"

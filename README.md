@@ -11,8 +11,10 @@ REST API 与 webhook 推送，不依赖任何聊天机器人框架。
 - 32 个来源：21 个公开站点（含研究生院、理学院、信息工程学院等）+ 信息门户全部 11 个有效栏目（type）。
 - 门户 SM2 国密加密登录 + Cookie 持久化 + 会话失效自动重登；支持翻页与历史回填。
 - SQLite 存储与去重（`INSERT OR IGNORE`，`Notice.id` 为主键）；关键词匹配标题/摘要/正文预览。
-- 正文与附件归档：门户抓 `getNotice` 下载附件与内联图，公开源抓文章正文；
-  落盘 `data/archive/<source_key>/<external_id>/`，超限按最近访问时间淘汰。
+- 正文与附件归档：门户抓 `getNotice` 下载附件与内联图；`notice_content` 为空时
+  自动回落 `notice_link` 抓外链正文（微信/学院新闻/人民网/`lib` 动态页），图片兼容
+  `data-src` 懒加载。落盘 `data/archive/<source_key>/<external_id>/`，
+  超限按最近访问时间淘汰。
 - 定时轮询；新通知通过 webhook 推送，支持 HMAC-SHA256 签名与来源过滤；回填默认不推送。
 - REST API 查询/搜索/归档，Swagger UI 在 `/docs`。
 - 远程检索：`/api/search` 直连学校 VSB9 全文索引（34 个站点，免登录，不写库）。

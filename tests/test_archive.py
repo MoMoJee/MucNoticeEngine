@@ -3,6 +3,7 @@ from datetime import datetime
 import httpx
 
 from muc_notice_engine.config import Settings
+from muc_notice_engine.core import archive as archive_mod
 from muc_notice_engine.core.archive import ArchiveQueue, ArchiveStore, safe_filename
 from muc_notice_engine.core.fetcher import CHINA_TZ
 from muc_notice_engine.core.models import Attachment, Notice, NoticeDetail
@@ -115,6 +116,100 @@ async def test_archive_store_rejects_html_download(tmp_path):
     assets = await store.get_assets(notice.id)
     assert all(a["kind"] == "content" for a in assets)
     await client.aclose()
+
+
+async def test_archive_store_limits_images_separately_from_files(tmp_path, monkeypatch):
+    settings = Settings(
+        data_dir=tmp_path,
+        db_path=tmp_path / "t.db",
+        archive_max_per_notice=1,
+        archive_max_images_per_notice=1,
+        archive_host_interval_ms=0,
+    )
+    store = NoticeStore(settings.db_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(".png"):
+            return httpx.Response(
+                200, content=b"png-bytes", headers={"content-type": "image/png"}
+            )
+        return httpx.Response(
+            200,
+            content=b"file-bytes",
+            headers={"content-type": "application/octet-stream"},
+        )
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+
+    def factory(*args, **kwargs):
+        kwargs.pop("headers", None)
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(archive_mod.httpx, "AsyncClient", factory)
+    archive_store = ArchiveStore(settings, store, None)
+    notice = _notice()
+    await store.upsert_notices([notice])
+    detail = NoticeDetail(
+        notice=notice,
+        content_html="<p>hi</p>",
+        plain_text="hi",
+        attachments=[
+            Attachment(annex_id="", name="1.png", url="https://x.test/1.png", kind="image"),
+            Attachment(annex_id="", name="2.png", url="https://x.test/2.png", kind="image"),
+            Attachment(annex_id="", name="a.bin", url="https://x.test/a.bin"),
+            Attachment(annex_id="", name="b.bin", url="https://x.test/b.bin"),
+        ],
+    )
+    records = await archive_store.archive(detail)
+    attachment_names = sorted(
+        r["remote_name"] for r in records if r["kind"] == "attachment"
+    )
+    assert attachment_names == ["1.png", "a.bin"]
+
+
+async def test_archive_store_retries_server_error(tmp_path, monkeypatch):
+    settings = Settings(
+        data_dir=tmp_path,
+        db_path=tmp_path / "t.db",
+        archive_external_retries=1,
+        archive_host_interval_ms=0,
+    )
+    store = NoticeStore(settings.db_path)
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(503, text="busy")
+        return httpx.Response(
+            200, content=b"png-bytes", headers={"content-type": "image/png"}
+        )
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+
+    def factory(*args, **kwargs):
+        kwargs.pop("headers", None)
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(archive_mod.httpx, "AsyncClient", factory)
+    archive_store = ArchiveStore(settings, store, None)
+    notice = _notice()
+    await store.upsert_notices([notice])
+    detail = NoticeDetail(
+        notice=notice,
+        content_html="<p>hi</p>",
+        plain_text="hi",
+        attachments=[
+            Attachment(annex_id="", name="a.png", url="https://x.test/a.png", kind="image")
+        ],
+    )
+    records = await archive_store.archive(detail)
+    assert [r["kind"] for r in records].count("attachment") == 1
+    assert calls["count"] == 2
 
 
 async def test_evict_to_limit_removes_oldest(tmp_path):

@@ -111,6 +111,187 @@ async def test_fetch_portal_detail_parses_annex_and_images(tmp_path):
     await client.aclose()
 
 
+async def test_portal_item_prefers_notice_link(tmp_path):
+    service = _service(tmp_path)
+    source = SOURCES_BY_KEY["my_hdbd"]
+    item = {
+        "notice_id": "359695",
+        "notice_title": "活动通知",
+        "notice_release_time": "2026-11-06 10:00:00",
+        "notice_content": "",
+        "notice_link": "https://mp.weixin.qq.com/s/abc",
+    }
+    notice = service._parse_portal_item(source, item, 7)
+    assert notice is not None
+    assert notice.link == "https://mp.weixin.qq.com/s/abc"
+
+    item.pop("notice_link")
+    fallback = service._parse_portal_item(source, item, 7)
+    assert fallback is not None
+    assert fallback.link.startswith("https://my.muc.edu.cn/page/11#/print?")
+
+
+async def test_portal_detail_falls_back_to_external_link(tmp_path, monkeypatch):
+    external_html = (
+        "<html><body><div id='js_content'>"
+        "<p>外链正文内容</p>"
+        "<img data-src='/img/a.png'>"
+        "<img data-original='https://cdn.example.com/b.jpg'>"
+        "<a href='/files/table.xlsx'>表格</a>"
+        "<a href='/other/page.html'>普通链接</a>"
+        "</div></body></html>"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getNotice"):
+            return httpx.Response(
+                200,
+                json={
+                    "datas": {
+                        "notice_info": {
+                            "notice_content": "",
+                            "notice_link": "https://mp.weixin.qq.com/s/abc",
+                            "notice_annext": [],
+                        }
+                    }
+                },
+            )
+        if request.url.host == "mp.weixin.qq.com":
+            return httpx.Response(200, text=external_html)
+        return httpx.Response(404)
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+
+    def factory(*args, **kwargs):
+        kwargs.pop("headers", None)
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(fetcher_mod.httpx, "AsyncClient", factory)
+    client = real_client(transport=transport)
+
+    class _StubAuth:
+        async def get_authenticated_client(self):
+            return client
+
+        def invalidate(self):
+            return None
+
+    service = MucRssService(
+        Settings(data_dir=tmp_path, db_path=tmp_path / "t.db"), _StubAuth()
+    )
+    notice = Notice(
+        id="my_hdbd:x",
+        title="活动通知",
+        link="https://my.muc.edu.cn/page/11#/print?type=7&notice_id=359695",
+        source="信息门户 - 活动报道",
+        source_key="my_hdbd",
+        category="notice",
+        date="",
+        pub_date="",
+        published_at=datetime(2026, 11, 6, tzinfo=CHINA_TZ),
+        external_id="359695",
+    )
+    detail = await service.fetch_detail(notice)
+    assert detail is not None
+    assert "外链正文内容" in detail.plain_text
+    kinds = {(a.kind, a.url) for a in detail.attachments}
+    assert ("image", "https://mp.weixin.qq.com/img/a.png") in kinds
+    assert ("image", "https://cdn.example.com/b.jpg") in kinds
+    assert ("file", "https://mp.weixin.qq.com/files/table.xlsx") in kinds
+    assert all("page.html" not in a.url for a in detail.attachments)
+    await client.aclose()
+
+
+async def test_portal_detail_extracts_lazy_images(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "datas": {
+                    "notice_info": {
+                        "notice_content": (
+                            "<p>正文</p><img data-src='/upload/lazy.png'>"
+                        ),
+                        "notice_annext": [],
+                    }
+                }
+            },
+        )
+
+    settings = Settings(data_dir=tmp_path, db_path=tmp_path / "t.db")
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    class _StubAuth:
+        async def get_authenticated_client(self):
+            return client
+
+        def invalidate(self):
+            return None
+
+    service = MucRssService(settings, _StubAuth())
+    notice = Notice(
+        id="my_gsgg:x",
+        title="t",
+        link="",
+        source="信息门户 - 公示公告",
+        source_key="my_gsgg",
+        category="notice",
+        date="",
+        pub_date="",
+        published_at=datetime(2026, 9, 1, tzinfo=CHINA_TZ),
+        external_id="358513",
+    )
+    detail = await service.fetch_detail(notice)
+    assert detail is not None
+    assert [a.url for a in detail.attachments] == [
+        "https://my.muc.edu.cn/upload/lazy.png"
+    ]
+    await client.aclose()
+
+
+async def test_public_detail_parses_engine2_embedded_json(tmp_path, monkeypatch):
+    html = (
+        "<html><body><script>"
+        'var data = {"title": "图书馆", "content": '
+        '"<p>内嵌正文</p><img src=\\"/img/lib.png\\">"};'
+        "</script></body></html>"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=html)
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+
+    def factory(*args, **kwargs):
+        kwargs.pop("headers", None)
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(fetcher_mod.httpx, "AsyncClient", factory)
+    service = _service(tmp_path)
+    notice = Notice(
+        id="lib:x",
+        title="图书馆动态",
+        link="https://lib.muc.edu.cn/engine2/d/123/0",
+        source="图书馆",
+        source_key="lib",
+        category="lib",
+        date="",
+        pub_date="",
+        published_at=datetime(2026, 11, 6, tzinfo=CHINA_TZ),
+        external_id="123",
+    )
+    detail = await service.fetch_detail(notice)
+    assert detail is not None
+    assert "内嵌正文" in detail.plain_text
+    assert [a.url for a in detail.attachments] == [
+        "https://lib.muc.edu.cn/img/lib.png"
+    ]
+
+
 async def test_public_detail_extracts_article(tmp_path, monkeypatch):
     html = (
         "<html><body><div class='v_news_content'>"

@@ -31,6 +31,9 @@ _ENV_MAP: dict[str, str] = {
     "MNE_ARCHIVE_WORKERS": "archive_workers",
     "MNE_ARCHIVE_MAX_FILE_MB": "archive_max_file_mb",
     "MNE_ARCHIVE_MAX_PER_NOTICE": "archive_max_per_notice",
+    "MNE_ARCHIVE_MAX_IMAGES_PER_NOTICE": "archive_max_images_per_notice",
+    "MNE_ARCHIVE_EXTERNAL_RETRIES": "archive_external_retries",
+    "MNE_ARCHIVE_HOST_INTERVAL_MS": "archive_host_interval_ms",
     "MNE_ARCHIVE_ENQUEUE_LIMIT_PER_POLL": "archive_enqueue_limit_per_poll",
     "MNE_ARCHIVE_WINDOW_DAYS": "archive_window_days",
     "MNE_ARCHIVE_FLOOR_DATE": "archive_floor_date",
@@ -55,6 +58,9 @@ _INT_FIELDS = {
     "archive_workers",
     "archive_max_file_mb",
     "archive_max_per_notice",
+    "archive_max_images_per_notice",
+    "archive_external_retries",
+    "archive_host_interval_ms",
     "archive_enqueue_limit_per_poll",
     "archive_window_days",
     "archive_total_limit_gb",
@@ -96,9 +102,13 @@ class Settings:
     # 后台下载 worker 数；单轮最多入队多少条新通知归档。
     archive_workers: int = 2
     archive_enqueue_limit_per_poll: int = 50
-    # 单文件、单通知附件数量上限。
+    # 单文件、单通知附件/图片数量上限。
     archive_max_file_mb: int = 50
     archive_max_per_notice: int = 50
+    archive_max_images_per_notice: int = 120
+    # 外链正文/图片的重试次数（仅 5xx 与网络异常重试）与同域请求最小间隔。
+    archive_external_retries: int = 1
+    archive_host_interval_ms: int = 300
     # 自动归档时间窗：published_at >= max(floor_date, now - window_days)。
     archive_window_days: int = 90
     archive_floor_date: str = "2026-08-31"

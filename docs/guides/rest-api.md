@@ -101,6 +101,10 @@ curl 'http://127.0.0.1:8080/api/search?site=xingong&q=%E6%8E%A8%E5%85%8D&match=a
 1. **已归档**：`/content` 返回落盘原文（`content.html`，保留原始链接）。
 2. **未归档**：返回 200 的预览页，响应头 `X-Muc-Content: preview`；连预览都没有则 404。
 
+门户条目的 `notice_content` 为空且带 `notice_link` 时，归档会自动抓取外链正文
+（微信、学院新闻、人民网、`lib.muc.edu.cn/engine2` 动态页等），并下载正文内的
+图片与附件。外站抓取失败只影响该条，日志会记录来源、URL、阶段与状态码。
+
 ```bash
 curl -o content.html http://127.0.0.1:8080/api/notices/<id>/content
 curl -o content.zip  http://127.0.0.1:8080/api/notices/<id>/content.zip
@@ -126,7 +130,11 @@ curl -OJ 'http://127.0.0.1:8080/api/notices/<id>/files?name=01-%E5%90%8D%E5%8D%9
 - 早于 cutoff 的历史通知**只入库、不自动归档**；需要时逐条
   `POST /api/notices/{id}/archive`（默认 `archive_enable=true`）。
 - 归档总量默认上限 64GB（`archive_total_limit_gb`），超限按最近访问时间升序淘汰。
-- 公开源 v1 只归档正文，不下载内联图片/附件；门户会下载附件与正文内联图。
+- 门户会下载附件与正文内联图；`notice_content` 为空时回落 `notice_link` 抓外链正文、
+  图片与附件。图片识别 `data-src` 等懒加载属性，单篇上限
+  `archive_max_images_per_notice`（默认 120）。公开源同样下载正文内联图与附件链接。
+- 外链请求同域串行（`archive_host_interval_ms`，默认 300ms），5xx/网络异常按
+  `archive_external_retries`（默认 1）重试；404/403 不重试。
 
 ## 抓取与回填
 
